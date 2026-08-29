@@ -13,4 +13,6 @@ __pycache__/
 out/
 assets/bgm/*.mp3
 assets/bgm/*.wav
+# 基準画像（キャラクターシート / ロケーションプレート）。ジョブ横断で使い回すが再生成できるので追跡しない。
+assets/refs/*.png
 !.env.example

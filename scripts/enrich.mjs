@@ -27,6 +27,44 @@ export const CAST = {
             en: "the boss: a Japanese man in his 50s, gray-streaked hair, dark suit, no glasses, calm heavy presence" },
 };
 export const SPEAKERS = ["none", "hero", "senpai", "boss"];
+
+// 固定ロケーション（2026-08-30 決定）。シーン画像は 5 枚を並列生成するため、
+// 舞台を自由記述にすると「同じオフィス」が毎回別の部屋になる。
+// キーで指定させ、assets/refs/loc_<key>.png（基準プレート）を参照として添付して見た目を固定する。
+export const LOCATIONS = {
+  office: {
+    jp: "オープンオフィス",
+    en: "a modern Japanese open-plan office: rows of desks with dual monitors, glass partitions, an exposed ceiling with linear light strips, cool teal-blue ambient light, floor-to-ceiling windows showing a night city skyline",
+  },
+  meeting: {
+    jp: "会議室",
+    en: "a corporate meeting room: one long table with black chairs, a glass wall onto the office floor, horizontal blinds, a wall-mounted display, a warm desk lamp against cool ceiling light",
+  },
+  server: {
+    jp: "サーバールーム",
+    en: "a data-centre server room: rows of black server racks with blue LED indicators, cold haze in the air, a heavy metal door, a raised floor and overhead cable trays",
+  },
+  corridor: {
+    jp: "オフィスの廊下",
+    en: "a long office corridor: a polished floor reflecting the ceiling lights, doors along both sides, a green emergency exit sign, dim lighting with one strip flickering, deep perspective toward a far door",
+  },
+  home: {
+    jp: "自宅（暗い寝室・机）",
+    en: "a small dark Japanese bedroom at night: an unmade bed, a low desk with a laptop and a charging phone, curtains half open with rain on the window, only a faint blue glow lighting the room",
+  },
+};
+export const LOCATION_KEYS = Object.keys(LOCATIONS);
+export const locationDescription = (k) => LOCATIONS[k]?.en ?? "";
+
+/** scene_type から推定する既定ロケーション（location を持たない旧 script.json 用）。 */
+export const DEFAULT_LOCATION = {
+  cold_open: "office",
+  setup: "office",
+  turn: "office",
+  montage: "corridor",
+  resolve: "meeting",
+};
+export const defaultLocation = (type) => DEFAULT_LOCATION[type] ?? "office";
 // 旧台本の話者キーを新キャストへ
 export const LEGACY_SPEAKER = { male_young: "hero", female_young: "senpai", female_mature: "senpai", male_mature: "boss" };
 export const castDescription = (keys = []) =>
@@ -117,6 +155,7 @@ export function enrichedView(data) {
       visual_metaphor: String(s.visual_metaphor ?? "").trim(),
       index: s.index ?? i + 1,
       scene_type: type,
+      location: LOCATION_KEYS.includes(s.location) ? s.location : defaultLocation(type),
       cut_count: cut,
       motion_beat: String(s.motion_beat ?? "").trim(),
       camera_beat: String(s.camera_beat ?? "").trim() || DEFAULT_CAMERA_BEAT[type],
@@ -279,7 +318,7 @@ const SCHEMA = {
         type: "object",
         additionalProperties: false,
         required: [
-          "index", "scene_type", "cut_count", "motion_beat", "camera_beat",
+          "index", "scene_type", "location", "cut_count", "motion_beat", "camera_beat",
           "ambient", "dialogue", "speaker", "telop_timing", "screen_text",
           "visual_metaphor",
         ],
@@ -289,6 +328,14 @@ const SCHEMA = {
             type: "string",
             enum: SCENE_TYPES,
             description: "予告の構造上の役割。先頭は cold_open、末尾は resolve。",
+          },
+          location: {
+            type: "string",
+            enum: LOCATION_KEYS,
+            description:
+              "このシーンの舞台。既存の image_prompt に描かれている場所に最も近いキーを選ぶ" +
+              `（${LOCATION_KEYS.map((k) => `${k}=${LOCATIONS[k].jp}`).join(" / ")}）。` +
+              "予告全体で 2〜3 箇所に絞り、同じ場所のシーンには必ず同じキーを使う。",
           },
           cut_count: {
             type: "integer",
@@ -406,6 +453,11 @@ Cold Open → Act1 → Act2 → Act3 → Button の予告文法に当てはめ�
 終盤ほどカットを細かくする（カットランプ）。基準は先頭から 1, 1, 2, 4, 3。**montage だけ 6 まで**、他の scene_type は 4 まで。
 1 カットあたり 0.9 秒を下回らないよう、短いシーンでは無理に増やさない。
 
+# 舞台（location）
+舞台は次のキーから選ぶ: ${LOCATION_KEYS.map((k) => `${k}（${LOCATIONS[k].jp}）`).join(" / ")}。
+**予告全体で 2〜3 箇所に絞る。同じ場所のシーンは必ず同じ location キーを使う。**
+既存の image_prompt に書かれている場所に最も近いキーを選ぶこと（絵は作り直さない）。
+
 # 視覚の翻訳（visual_metaphor）
 各シーンに「この失敗を何のアクション演出に翻訳したか」を日本語 1 行で書く（例: 本番 DB 削除 → サーバーラックの連鎖爆発）。
 既存の image_prompt から離れすぎないこと（絵は作り直さない）。motion_beat はこの翻訳を実行する動作にする。
@@ -519,6 +571,7 @@ export async function enrichScript(job, { force = false, dryRun = false } = {}) 
     return {
       ...s, // ← 既存フィールドを温存
       scene_type: type,
+      location: LOCATION_KEYS.includes(a.location) ? a.location : defaultLocation(type),
       cut_count: Math.max(1, Math.min(cutCap(type), Math.round(Number(a.cut_count) || DEFAULT_CUT_COUNT[type]))),
       motion_beat: String(a.motion_beat ?? "").trim(),
       camera_beat: String(a.camera_beat ?? "").trim() || DEFAULT_CAMERA_BEAT[type],
@@ -564,7 +617,7 @@ export async function enrichScript(job, { force = false, dryRun = false } = {}) 
   for (const s of data.scenes) {
     const dlg = s.dialogue ? ` / セリフ「${s.dialogue}」(${s.speaker})` : "";
     const st = s.screen_text.length ? ` / 画面 ${s.screen_text.join(",")}` : "";
-    console.log(`   s${s.index} ${s.scene_type} cut=${s.cut_count} telop=${s.telop_timing}${dlg}${st}`);
+    console.log(`   s${s.index} ${s.scene_type} @${s.location} cut=${s.cut_count} telop=${s.telop_timing}${dlg}${st}`);
     console.log(`      camera: ${s.camera_beat} / motion: ${s.motion_beat} / amb: ${s.ambient}`);
     if (s.visual_metaphor) console.log(`      翻訳: ${s.visual_metaphor}`);
   }

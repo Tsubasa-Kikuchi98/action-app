@@ -17,6 +17,7 @@ import { getOpenAI, MODELS, timed, writeScript, jobPaths, fmtUSD, isMain } from 
 import {
   SCENE_TYPES, SPEAKERS, LEGACY_SPEAKER, CAST, TELOP_TIMINGS, STYLES, DEFAULT_STYLE, DEFAULT_CUT_COUNT,
   DEFAULT_CAMERA_BEAT, DURATION_RAMP, COPY_PRINCIPLES, PARODY_PRINCIPLES,
+  LOCATIONS, LOCATION_KEYS, defaultLocation,
   guessSceneType, cutCap, maxDialogue, findForbidden,
 } from "./enrich.mjs";
 
@@ -103,7 +104,7 @@ const SCHEMA = {
         additionalProperties: false,
         required: [
           "narration", "telop", "image_prompt", "video_prompt", "duration_sec",
-          "scene_type", "cut_count", "visual_metaphor", "motion_beat", "camera_beat",
+          "scene_type", "location", "cut_count", "visual_metaphor", "motion_beat", "camera_beat",
           "ambient", "dialogue", "speaker", "telop_timing", "screen_text", "characters",
         ],
         properties: {
@@ -134,6 +135,15 @@ const SCHEMA = {
             type: "string",
             enum: SCENE_TYPES,
             description: "予告の構造上の役割。先頭は cold_open、末尾は resolve。",
+          },
+          location: {
+            type: "string",
+            enum: LOCATION_KEYS,
+            description:
+              "このシーンの舞台。次から選ぶ: " +
+              LOCATION_KEYS.map((k) => `${k}=${LOCATIONS[k].jp}`).join(" / ") +
+              "。**予告全体で 2〜3 箇所に絞り、同じ場所のシーンには必ず同じキーを使う。**" +
+              "image_prompt はここで選んだ場所と矛盾しないように書く。",
           },
           cut_count: {
             type: "integer",
@@ -280,7 +290,7 @@ ${structureBlock(style)}
 - **montage は対応行動**（召集・移動・突入・報告へ向かう）を 1〜1.5 秒で並べられる素材に。**resolve は解決の直前で止める**（受話器を取る・Enter に指・扉の前）。決着は映さない。
 - **窓ガラスが割れる瞬間の破片と武器は書かない**（Veo が弾く）。「割れた直後」で代替する。
 - image_prompt は **1 カットの静止画**（動画生成の起点フレーム）。montage でも「モンタージュ」「複数カット」を 1 枚に書かず、**最初の 1 カット（最もアクションの強い瞬間）だけ**を描く。カットの連なりは cut_count と motion_beat で表す。
-- image_prompt はその演出をそのまま英語で描写する。舞台は現実の場所の範囲で 2〜3 箇所に散らす（オフィス、自宅、通勤路、会議室、サーバールーム）。
+- image_prompt はその演出をそのまま英語で描写する。
 - **脅威・障害は実物の視覚要素で 1 つ描く**（赤く点滅する金額、回り続けるログ、火花を上げるラック、鳴り続ける電話）。抽象化しない。
 - ショットサイズをシーンごとに変える（wide → medium → close-up → extreme close-up）。
 - 現代日本の情景。画面内に文字・ロゴ・字幕を描かせない。流血・負傷・実在ブランド・実在人物の顔は書かない。
@@ -292,6 +302,11 @@ ${structureBlock(style)}
 
 # 画面内テロップ（screen_text）
 - モニタや時計に映る「実在する表示」として自然なものだけ。英数字中心。緊張が高いシーンに 1〜2 個、静かなシーンは空配列。
+
+# 舞台（location）
+- **舞台はキーで選ぶ。自由記述にしない。** 選べるのは次だけ: ${LOCATION_KEYS.map((k) => `${k}（${LOCATIONS[k].jp}）`).join(" / ")}。
+- **予告全体で 2〜3 箇所に絞る。同じ場所のシーンは同じ location キーを使う。**（毎シーン舞台を変えると別作品に見える）
+- image_prompt はその location と矛盾しないように書く。部屋の作り・照明・小物は基準画像側で固定されるので、image_prompt には**その場所で何が起きているか**（人物の動作・カメラ・光の変化）だけを書く。
 
 # telop_timing
 - turn / montage は cut_head、cold_open / setup / resolve は after_narration を基本にする。
@@ -368,6 +383,7 @@ export function normalize(data, episode, style = DEFAULT_STYLE) {
         : DURATION_RAMP[i] ?? 4,
       index: i + 1,
       scene_type: type,
+      location: LOCATION_KEYS.includes(s.location) ? s.location : defaultLocation(type),
       cut_count: Math.max(1, Math.min(cutCap(type), Math.round(Number(s.cut_count) || DEFAULT_CUT_COUNT[type]))),
       visual_metaphor: oneLine(s.visual_metaphor).slice(0, 60),
       motion_beat: String(s.motion_beat ?? "").trim(),
@@ -471,7 +487,7 @@ export function printScript(data) {
   console.log(`  scenes: ${data.scenes.length} / 合計 ${total.toFixed(1)}s`);
   for (const s of data.scenes) {
     const dlg = s.dialogue ? ` / 「${s.dialogue}」(${s.speaker})` : "";
-    console.log(`   s${s.index} [${s.scene_type}] ${s.duration_sec}s cut=${s.cut_count} ${s.telop_timing}`);
+    console.log(`   s${s.index} [${s.scene_type}] @${s.location} ${s.duration_sec}s cut=${s.cut_count} ${s.telop_timing}`);
     console.log(`      ナレ: ${s.narration || "(なし)"}${dlg}`);
     console.log(`      テロップ: ${s.telop} / 翻訳: ${s.visual_metaphor || "(なし)"}`);
   }

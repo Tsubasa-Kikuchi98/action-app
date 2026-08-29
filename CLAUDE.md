@@ -19,6 +19,7 @@
 |---|---|---|
 | 台本生成 | OpenAI `gpt-5.6-luna` + Structured Outputs（json_schema, strict） | 出力: `{ title, tagline, presents, review_line, stake, button_line, style, release_line, cast_lines, interstitials, scenes[]{ narration, telop, dialogue, visual_metaphor, image_prompt, video_prompt, scene_type, cut_count, telop_timing, ... } }`。パロディの原理・視覚の翻訳文法は `PARODY_PRINCIPLES`（enrich.mjs）に集約 |
 | 画像生成 | OpenAI `gpt-image-2` / `1536x1024` / 開発中は `quality: "low"`、本番は `medium` | 写真ありは `images/edits` に参照画像を毎回添付。`Promise.all` で並列。Tier1 は 5枚/分。Phase 2 以降は動画の起点画像＋フォールバック |
+| 基準画像（Phase 3 D） | `scripts/refs.mjs` が `assets/refs/` に **キャラシート `char_<hero\|senpai\|boss>.png`（同一人物 3 ビュー）＋ ロケプレート `loc_<key>.png`（人物なし）** を medium で生成（ジョブ横断で再利用・git 管理外） | シーン画像は **`images/edits`** で `image[]` に「characters のキャラシート最大 3 枚＋location のプレート 1 枚」を添付して生成し、並列 5 枚でも顔・服・部屋を揃える。`input_fidelity` は gpt-image-2 では送らない（常に高忠実度で固定）。参照 0 枚のシーンは `images/generations` にフォールバック |
 | 動画生成（Phase 2） | Google Gemini API **Veo 3.1 Lite** `veo-3.1-lite-generate-preview` / 720p / image-to-video / 4・6・8 秒 | $0.05/秒、無料枠なし。音声は常に同梱（環境音として採用、`no dialogue, no speech` をプロンプトに固定）。生成 11秒〜最大6分・非同期ポーリング。生成物はサーバ保持2日 → 即DL。失敗時はそのシーンだけ静止画 Ken Burns にフォールバック。品質向上時は `veo-3.1-fast-generate-preview` にモデル名差し替え |
 | ナレーション | OpenAI `gpt-4o-mini-tts` / voice `cedar` / `response_format: "wav"` / `speed` 1.0 | `instructions` は openai.fm 公式のラベル形式。共通ブロック ＋ scene_type 別ブロック。生成後に前後の無音を自動トリム |
 | セリフ（Phase 3） | 同 TTS。ナレとは別 voice（`ash` / `onyx` / `nova` / `shimmer`）で `out/<job>/dlg/sN.wav` | 台本の `dialogue`（予告全体で 2〜3 本）。render で小部屋の残響を付けて「現場の声」にする |
@@ -35,13 +36,15 @@ Anthropic API は使わない（Claude Code サブスクに API は含まれな�
 scripts/           各工程のスクリプト（gen-image.mjs は既存）
   script.mjs       ① 台本生成 → out/<job>/script.json
   enrich.mjs       ①' 演出情報の付与（既存フィールドは変更しない）→ script.json
-  images.mjs       ② 画像生成 → out/<job>/img/sN.png
+  refs.mjs         ⓪ 基準画像 → assets/refs/char_*.png・loc_*.png（ジョブ横断で再利用）
+  images.mjs       ② 画像生成（images/edits に基準画像を添付）→ out/<job>/img/sN.png
   narration.mjs    ③ TTS      → out/<job>/nar/sN.wav・out/<job>/dlg/sN.wav（セリフ）
   video.mjs        ③' Veo     → out/<job>/vid/sN.mp4（Phase 2）
   bgm.mjs          ④ BGM      → out/<job>/bgm.mp3
   render.mjs       ⑤ ffmpeg   → out/<job>/cuts/cNNN.mp4 ＋ telop.ass → out/<job>/trailer.mp4
   run.mjs          ①〜⑤ を順に実行（--stills で動画生成をスキップ）
 assets/bgm/        フォールバック用フリーBGM
+assets/refs/       基準画像（キャラシート / ロケプレート。git 管理外）
 out/               生成物（git 管理外）
 docs/              企画・調査資料
 ```
@@ -51,6 +54,7 @@ docs/              企画・調査資料
 - `OPENAI_API_KEY`（必須）
 - `GEMINI_API_KEY`（Phase 2 動画生成。Google AI Studio で発行＋課金有効化）
 - `ELEVENLABS_API_KEY`（BGM を API で作る場合のみ）
+- `REFS_QUALITY`（基準画像の quality。既定 **medium**）、`REFS_SIZE`（既定 1536x1024）
 - `TTS_SPEED`（既定 **1.0**）、`TTS_VOICE`（既定 cedar）、`TTS_TRIM`（既定 on）、`IMG_QUALITY`（既定 low）、`IMG_SIZE`（既定 1536x1024）
 - Phase 3 の演出調整: `AMBIENT_VOL`（既定 **0.9**）、`AMBIENT_TARGET_DB`（既定 -20）、`DLG_VOL` / `BTN_VOL`、`BGM_VOL`、`XFADE_SEC`、`LETTERBOX`、`PRESENTS_SEC` / `REVIEW_SEC` / `INTER_SEC` / `STOPDOWN_SEC` / `TITLE_SEC` / `BUTTON_MIN` / `BUTTON_MAX` / `SILENT_TELOP_SEC`、`VEO_GEN_SEC`（既定 8）
 - 台本の型: `TRAILER_STYLE`（`narration` 既定 / `dialogue`。`node scripts/script.mjs ... --style=dialogue` でも指定可）、`NAR_TOTAL_MAX`（既定 80）
@@ -130,6 +134,7 @@ docs/              企画・調査資料
 - [x] 8 秒生成 → render 側で前半だけ使う設計に変更（`VEO_GEN_SEC` 既定 8、`VEO_BUDGET_SEC` 48）
 - [ ] 実際に Veo を再生成する（5 シーン × 8 秒 = $2.00。`node scripts/video.mjs demo3 --force`）
 - [x] 起点画像のプロンプト改善 → demo4 で実施（石板崩落／赤灯の保管庫／金庫室／夜の街の部隊／逆再生の破片）
+- [x] **基準画像（リファレンス）による人物・ロケの一貫性**（2026-08-30）: `scripts/refs.mjs` を追加し `assets/refs/` にキャラシート 3 枚＋ロケプレート 3 枚を生成（$0.252）。台本に `location`（enum）を追加し、`images.mjs` を `images/edits` に切り替え。lambda の 5 枚で顔・服・部屋がほぼ完全に一致（$0.21）
 - [ ] Lite で 1〜2 本比較 → 不足なら Fast を 1 本（要確認）
 #### E. 評価
 - [x] イテレーション 1 完了、菊池の採点待ち（`out/demo3/trailer.mp4` 35.7 秒 / 14 カット / セリフ 3 本 / −13.7 LUFS）

@@ -23,7 +23,15 @@
   │      scenes[5]{ scene_type, narration, telop, telop_timing, dialogue+speaker, screen_text[],
   │                 image_prompt, motion_beat, camera_beat, ambient, cut_count, duration_sec } }
   │    旧 script.json は ①' enrich.mjs で非破壊的に同形へ拡張（$0.02）
-  ▼ ② 起点静止画 ×5  images.mjs  gpt-image-2 / 1536x1024                       ~30秒 / $0.02〜0.2
+  │    各シーンは characters[]（hero/senpai/boss）と location（enum: office/meeting/server/corridor/home）を持つ
+  ▼ ⓪ 基準画像     refs.mjs  gpt-image-2 / medium → assets/refs/                 ~40秒 / $0.042/枚
+  │    char_<key>.png … 同一人物の 3 ビュー（正面／斜め 45 度／全身）を 1 枚に。灰背景・均一照明・文字なし
+  │    loc_<key>.png  … 人物なしのロケーション基準プレート（照明・色・小道具の基準）
+  │    **ジョブ横断で使い回す**（git 管理外）。既存はスキップするので 2 本目以降は $0
+  ▼ ② 起点静止画 ×5  images.mjs  gpt-image-2 / 1536x1024                       ~40秒 / $0.02〜0.21
+  │    **images/edits** で image[] に「そのシーンの characters のキャラシート（最大 3 枚）＋
+  │    location のプレート（1 枚）」を添付 → 5 枚を並列生成しても顔・服・部屋が揃う
+  │    参照が 1 枚も無いシーンは images/generations にフォールバック
   ├─▶ ③ 動画 ×5   video.mjs  Veo 3.1 Lite image-to-video 720p（motion-first、セリフは引用符） 1〜6分 / $0.05/秒
   │     並列 3 → ポーリング → 即DL。失敗はそのシーンだけ still（Ken Burns）
   ├─▶ ③' 音声     narration.mjs  gpt-4o-mini-tts: ナレ 5 本(cedar, scene_type 別 instructions) + セリフ 3 本(別声)
@@ -39,7 +47,7 @@
   │               → amix(normalize=0) → loudnorm I=-14 → alimiter → 48kHz
   → trailer.mp4 1920x1080 / 30fps（demo3: 35.7 秒、−13.7 LUFS）
 
-run.mjs: ① → ①'(不足時) → ② → ③ → ③' → ④ → ⑤。--stills で ③ をスキップ
+run.mjs: ① → ①'(不足時) → ⓪(不足分のみ) → ② → ③ → ③' → ④ → ⑤。--stills で ③ をスキップ
 ```
 設計原則: 工程ごとに独立スクリプト、中間生成物は `out/<job>/` に残す。台本 JSON が唯一の真実で、演出判断はすべてそこに書かれ render は解釈するだけ。
 

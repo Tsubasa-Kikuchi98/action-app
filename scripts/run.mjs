@@ -3,7 +3,8 @@
 //   npm run trailer -- "<エピソード文>" demo1
 //
 // 流れ（Phase 2）:
-//   ① 台本 → ①' 演出(enrich, 不足時のみ) → ｛② 画像 ‖ ③' ナレ+セリフ ‖ ④ BGM｝並列
+//   ① 台本 → ①' 演出(enrich, 不足時のみ) → ⓪ 基準画像(不足分のみ)
+//     → ｛② 画像 ‖ ③' ナレ+セリフ ‖ ④ BGM｝並列
 //     → ③ 動画(Veo) → ⑤ 合成
 //   ③ を並列グループに入れないのは、起点画像（②）と 4/6/8 に丸めた尺（③'）の両方に依存するため。
 //   --stills を付けると ③ をスキップして Phase 1 相当（静止画 Ken Burns のみ）になる。
@@ -15,6 +16,7 @@ import {
 } from "./lib.mjs";
 import { generateScript } from "./script.mjs";
 import { enrichScript, isEnriched } from "./enrich.mjs";
+import { ensureRefs, refsNeededForScript } from "./refs.mjs";
 import { generateImages } from "./images.mjs";
 import { generateNarration } from "./narration.mjs";
 import { generateVideos } from "./video.mjs";
@@ -52,6 +54,14 @@ export async function runAll(episode, job, { force = false, skipScript = false, 
   } else {
     await step("①' 演出", () => enrichScript(job));
   }
+
+  // ⓪ 基準画像（キャラクターシート・ロケーションプレート）
+  //   assets/refs/ にジョブ横断で残る。台本が必要とする分だけ、不足しているものを生成する。
+  //   これを ② より前に置くことで、5 枚を並列生成しても人物とロケの見た目が揃う。
+  await step("⓪ 基準画像", async () => {
+    const need = refsNeededForScript(readScript(job));
+    return ensureRefs({ ...need, force: false });
+  });
 
   // ② 画像 ‖ ③' ナレーション ‖ ④ BGM（互いに独立なので並列）
   //   ※ script.json を書き戻すのは narration だけ。images / bgm は読むだけなので競合しない。
