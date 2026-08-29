@@ -89,7 +89,10 @@ export function buildVideoPrompt(scene) {
   const ambient = (scene.ambient ?? "").trim() || AMBIENT_FALLBACK;
   const dialogue = (scene.dialogue ?? "").trim();
 
-  // motion_beat が無い旧台本は video_prompt / image_prompt から動きを拾う
+  // Phase 3（コンセプト版）: visual_metaphor（例「本番 DB 削除 → サーバーラックの連鎖爆発」）が
+  // 「どのアクション演出に翻訳したか」を持ち、motion_beat / image_prompt はそれに沿って書かれている。
+  // Veo に渡すのは英語のみなので、ここでは motion_beat をそのまま使い、
+  // 無い旧台本だけ video_prompt / image_prompt から動きを拾う（--dry-run で翻訳を目視確認する）。
   const action =
     motion ||
     scene.video_prompt?.trim() ||
@@ -266,6 +269,8 @@ export async function generateVideos(job, { force = false, stills = false, dryRu
       sec += d;
       console.log(`
 --- s${i + 1} [${s.scene_type}] ${d}s 生成 ---`);
+      // visual_metaphor は Veo には送らない（日本語）。翻訳が効いているかの確認用に並べて表示する。
+      if (s.visual_metaphor) console.log(`  [翻訳] ${s.visual_metaphor}`);
       console.log(buildVideoPrompt(s));
     }
     const cost = (PRICES[MODELS.video]?.perSec ?? 0) * sec;

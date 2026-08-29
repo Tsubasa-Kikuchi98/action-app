@@ -43,6 +43,11 @@ const PRESENTS_SEC = Number(process.env.PRESENTS_SEC ?? 1.4);
 const INTER_SEC = Number(process.env.INTER_SEC ?? 1.05);
 const STOPDOWN_SEC = Number(process.env.STOPDOWN_SEC ?? 0.5); // タイトル直前の「無音の黒」
 const TITLE_SEC = Number(process.env.TITLE_SEC ?? 3.4);
+const REVIEW_SEC = Number(process.env.REVIEW_SEC ?? 1.0);   // 煽りテロップ（review_line）カード
+const BUTTON_MIN = Number(process.env.BUTTON_MIN ?? 1.0);   // タイトル後の落ち（button_line）
+const BUTTON_MAX = Number(process.env.BUTTON_MAX ?? 1.4);
+// telop_timing: on_silence で音を落とす長さ（テロップだけを見せる）
+const SILENT_TELOP_SEC = Number(process.env.SILENT_TELOP_SEC ?? 0.4);
 const FLASH_SEC = 2 / FPS; // 白フラッシュ 2 フレーム
 
 // カット割りの下限とシーン尺の計算
@@ -59,6 +64,7 @@ const AMBIENT_VOL = Number(process.env.AMBIENT_VOL ?? 0.9);
 const AMBIENT_TARGET_DB = Number(process.env.AMBIENT_TARGET_DB ?? -20); // クリップごとに mean をここへ揃える
 const NAR_VOL = Number(process.env.NAR_VOL ?? 1.0);
 const DLG_VOL = Number(process.env.DLG_VOL ?? 1.0);
+const BTN_VOL = Number(process.env.BTN_VOL ?? 1.0);
 const BGM_VOL = Number(process.env.BGM_VOL ?? 0.22);
 
 // cold_open → setup の 1 箇所だけクロスディゾルブする（それ以外はハードカット）
@@ -143,6 +149,10 @@ function buildAss(events) {
     `Style: Telop,${FONTNAME},70,&H00FFFFFF,&H000000FF,&H00101010,&HB4000000,-1,0,0,0,100,100,14,0,1,0,4,2,90,90,176,1`,
     // 画面内テロップ: 小さめ・半透明・英数字
     `Style: Screen,${FONTNAME},40,&H55FFFFFF,&H000000FF,&H00101010,&H80000000,-1,0,0,0,100,100,6,0,1,0,2,7,0,0,0,1`,
+    // 煽りテロップ（「情シスが泣いた」）: 小さめ・字間広め
+    `Style: Review,${FONTNAME},46,&H00DCDCDC,&H000000FF,&H00101010,&H00000000,-1,0,0,0,100,100,26,0,1,0,0,5,0,0,0,1`,
+    // button（タイトル後の落ち）: 演出を落とした素の一行
+    `Style: Button,${FONTNAME},40,&H00E6E6E6,&H000000FF,&H00101010,&H00000000,0,0,0,0,100,100,4,0,1,0,0,5,0,0,0,1`,
     // 中間カード
     `Style: Inter,${FONTNAME},80,&H00FFFFFF,&H000000FF,&H00101010,&H00000000,-1,0,0,0,100,100,20,0,1,0,0,5,0,0,0,1`,
     // 冒頭 PRESENTS
@@ -178,6 +188,8 @@ async function buildPlan(job, view) {
   const segs = [];
   const nar = [];
   const dlg = [];
+  const btn = [];       // button_line（タイトル後の落ち）。0 or 1 本
+  const silences = [];  // 全レーンを落とす区間（stopdown と telop_timing: on_silence）
   const ass = [];
 
   // --- 素材の実測（尺と環境音レベル） ------------------------------------
@@ -188,7 +200,10 @@ async function buildPlan(job, view) {
     const img = path.join(p.img, `s${nn}.png`);
     const narFile = path.join(p.nar, `s${nn}.wav`);
     const dlgFile = path.join(p.dlg, `s${nn}.wav`);
-    if (!fs.existsSync(narFile)) throw new Error(`ナレーションがありません: ${narFile}（scripts/narration.mjs を先に）`);
+    // 案 B（style: "dialogue"）は narration が空のシーンがある → その場合 wav は作られない
+    const wantNar = Boolean(String(s.narration ?? "").trim());
+    const hasNar = fs.existsSync(narFile) && fs.statSync(narFile).size > 0;
+    if (wantNar && !hasNar) throw new Error(`ナレーションがありません: ${narFile}（scripts/narration.mjs を先に）`);
 
     const useVideo = s.motion === "video" && fs.existsSync(vid) && fs.statSync(vid).size > 0;
     let clipSec = 0;
@@ -207,11 +222,11 @@ async function buildPlan(job, view) {
       throw new Error(`素材がありません: ${img} も ${vid} も見つかりません`);
     }
 
-    const narSec = await probeDuration(narFile);
+    const narSec = hasNar ? await probeDuration(narFile) : 0;
     const hasDlg = Boolean(s.dialogue) && fs.existsSync(dlgFile) && fs.statSync(dlgFile).size > 0;
     const dlgSec = hasDlg ? await probeDuration(dlgFile) : 0;
 
-    src.push({ i, n: nn, s, useVideo, vid, img, clipSec, hasAudio, gainDb, narFile, narSec, dlgFile, hasDlg, dlgSec });
+    src.push({ i, n: nn, s, useVideo, vid, img, clipSec, hasAudio, gainDb, narFile, hasNar, narSec, dlgFile, hasDlg, dlgSec });
   }
 
   // --- スロー / フラッシュを入れる位置を決める ----------------------------
@@ -237,14 +252,38 @@ async function buildPlan(job, view) {
     });
   }
 
+  // --- 煽りテロップ（review_line）: 提供カードの直後に 1 枚だけ ------------
+  if (view.review_line) {
+    const c = push({ kind: "card", color: "black", outSec: REVIEW_SEC });
+    ass.push({
+      style: "Review", start: c.absStart, end: c.absStart + c.outSec,
+      tags: `{\\pos(960,540)\\fad(220,220)}`, text: view.review_line,
+    });
+  }
+
+  // --- 中間カード: 2 枚目に賭け金（stake）を入れる ------------------------
+  // trailer-structure §9-6: 2 枚目は montage 直前の「賭け金」。
+  // interstitials 側に既に同じ文言が入っているときは重複させない。
+  const inter = view.interstitials.map((it) => ({ ...it }));
+  if (view.stake && !inter.some((it) => it.text.includes(view.stake) || view.stake.includes(it.text))) {
+    if (inter.length >= 2) inter[1].text = view.stake;
+    else if (inter.length === 1) inter.push({ text: view.stake, after_scene: Math.min(n - 1, inter[0].after_scene + 1) });
+    else inter.push({ text: view.stake, after_scene: Math.max(1, n - 2) });
+  }
+
   // --- 本編 ---------------------------------------------------------------
   let xfadeAfter = -1; // この segments index の直後で xfade する
   for (const m of src) {
     const { s, i } = m;
 
     // シーンの表示尺: ナレが必ず収まり、セリフがあればその分伸ばす
-    let D = Math.max(m.narSec + NAR_LEAD + NAR_TAIL, MIN_SCENE);
+    let D = Math.max(m.hasNar ? m.narSec + NAR_LEAD + NAR_TAIL : (s.duration_sec ?? MIN_SCENE), MIN_SCENE);
     if (m.hasDlg) D = Math.max(D, NAR_LEAD + m.narSec + DLG_GAP + m.dlgSec + DLG_TAIL);
+    // on_silence は「声が終わってから音を落とす」ので、その分シーンを伸ばして席を作る
+    if (s.telop_timing === "on_silence") {
+      const voiceLen = NAR_LEAD + (m.hasNar ? m.narSec : 0) + (m.hasDlg ? DLG_GAP + m.dlgSec : 0);
+      D = Math.max(D, voiceLen + 0.1 + SILENT_TELOP_SEC + 0.25);
+    }
     D = snap(D);
 
     // カット数: cut_count を下限に、1 カットが MAX_CUT_BY_TYPE を超えないよう増やす。
@@ -308,19 +347,29 @@ async function buildPlan(job, view) {
 
     // --- 音イベント -------------------------------------------------------
     const narAt = sceneStart + NAR_LEAD;
-    nar.push({ n: m.n, file: m.narFile, at: narAt, sec: m.narSec });
+    if (m.hasNar) nar.push({ n: m.n, file: m.narFile, at: narAt, sec: m.narSec });
+    let voiceEnd = m.hasNar ? narAt + m.narSec : sceneStart; // このシーンで声が鳴り終わる時刻
     if (m.hasDlg) {
       // セリフはナレと重ねない（重なる場合は後ろにずらす）
-      const want = s.telop_timing === "cut_head" ? sceneStart + 0.15 : narAt + m.narSec + DLG_GAP;
-      const at = Math.max(want, narAt + m.narSec + DLG_GAP);
+      const narEnd = voiceEnd;
+      const want = s.telop_timing === "cut_head" ? sceneStart + 0.15 : narEnd + DLG_GAP;
+      const at = m.hasNar ? Math.max(want, narEnd + DLG_GAP) : sceneStart + 0.25;
       dlg.push({ n: m.n, file: m.dlgFile, at, sec: m.dlgSec, text: s.dialogue });
+      voiceEnd = Math.max(voiceEnd, at + m.dlgSec);
     }
 
     // --- テロップ ---------------------------------------------------------
     const sceneEnd = sceneStart + D;
     if (s.telop) {
       const cutHead = s.telop_timing === "cut_head";
-      const tStart = cutHead ? sceneStart + 0.03 : narAt + m.narSec * 0.55;
+      const onSilence = s.telop_timing === "on_silence";
+      // on_silence: そのシーンの声（ナレ・セリフ）を言い切った直後に音を落とし、テロップだけを見せる。
+      // 声の途中でゲートを掛けると台詞が切れるので、必ず voiceEnd の後ろに置く。
+      const tStart = onSilence
+        ? Math.max(voiceEnd + 0.1, sceneStart + 0.2)
+        : cutHead
+        ? sceneStart + 0.03
+        : narAt + m.narSec * 0.55;
       // 出しっぱなしにしない（カット頭に叩くテロップほど短く抜く）
       const tMax = cutHead ? TELOP_MAX_CUT_HEAD : TELOP_MAX_AFTER_NAR;
       const tEnd = Math.min(Math.max(tStart + 0.8, sceneEnd - 0.05), tStart + tMax);
@@ -328,9 +377,16 @@ async function buildPlan(job, view) {
         style: "Telop", start: tStart, end: tEnd,
         tags: cutHead
           ? `{\\fad(80,300)\\blur0.8\\fscx106\\fscy106\\t(0,220,\\fscx100\\fscy100)}`
+          : onSilence
+          ? `{\\fad(120,220)\\blur0.6\\fscx108\\fscy108\\t(0,260,\\fscx100\\fscy100)}`
           : `{\\fad(500,350)\\blur1.2\\fscx104\\fscy104\\t(0,700,\\fscx100\\fscy100)}`,
         text: s.telop,
       });
+      if (onSilence) {
+        const st = Math.min(tStart, sceneEnd - SILENT_TELOP_SEC - 0.05);
+        // 声の途中に食い込むくらいなら無音演出そのものを諦める（台詞を切らない）
+        if (st >= voiceEnd - 0.01) silences.push({ start: st, end: st + SILENT_TELOP_SEC });
+      }
     }
     // 画面内テロップ（gap-analysis 3-6）: 上部の左右に小さく
     s.screen_text.forEach((txt, k) => {
@@ -344,7 +400,7 @@ async function buildPlan(job, view) {
     });
 
     // --- 中間カード -------------------------------------------------------
-    for (const it of view.interstitials.filter((x) => x.after_scene === m.n)) {
+    for (const it of inter.filter((x) => x.after_scene === m.n)) {
       const c = push({ kind: "card", color: "black", outSec: INTER_SEC });
       ass.push({
         style: "Inter", start: c.absStart, end: c.absStart + c.outSec,
@@ -356,6 +412,7 @@ async function buildPlan(job, view) {
   // --- stopdown（無音の黒）→ タイトル ------------------------------------
   const stop = push({ kind: "card", color: "black", outSec: STOPDOWN_SEC });
   const silence = { start: stop.absStart, end: stop.absStart + stop.outSec };
+  silences.push(silence);
 
   const title = push({ kind: "card", color: "black", outSec: TITLE_SEC });
   const T0 = title.absStart;
@@ -395,22 +452,45 @@ async function buildPlan(job, view) {
     });
   }
 
+  // --- button（タイトル後の落ち）------------------------------------------
+  // trailer-structure §2 の普遍則 ④「タイトル後に必ず button」。
+  // 予告の重厚さを一度も崩さずに来て、ここで初めて現実に戻る。
+  if (view.button_line) {
+    const btnFile = path.join(p.dlg, "button.wav");
+    const hasBtn = fs.existsSync(btnFile) && fs.statSync(btnFile).size > 0;
+    const btnSec = hasBtn ? await probeDuration(btnFile) : 0;
+    const want = Math.min(BUTTON_MAX, Math.max(BUTTON_MIN, btnSec + 0.35));
+    const outSec = Math.max(want, btnSec + 0.25); // 音が切れるくらいなら上限を超えて伸ばす
+    const b = push({ kind: "card", color: "black", outSec });
+    if (hasBtn) btn.push({ file: btnFile, at: b.absStart + 0.12, sec: btnSec, text: view.button_line });
+    ass.push({
+      style: "Button", start: b.absStart + 0.05, end: b.absStart + b.outSec,
+      tags: `{\\pos(960,540)\\fad(120,180)}`, text: view.button_line,
+    });
+  }
+
   // --- xfade による時刻の繰り上げ ----------------------------------------
   const useXfade = xfadeAfter >= 0 && xfadeAfter + 1 < segs.length && XFADE_SEC > 0;
   const shift = useXfade ? snap(XFADE_SEC) : 0;
   if (useXfade) {
     for (let k = xfadeAfter + 1; k < segs.length; k++) segs[k].absStart -= shift;
     const shiftAfter = segs[xfadeAfter].absStart + segs[xfadeAfter].outSec - shift;
-    for (const e of [...nar, ...dlg]) if (e.at >= shiftAfter) e.at -= shift;
+    for (const e of [...nar, ...dlg, ...btn]) if (e.at >= shiftAfter) e.at -= shift;
     for (const e of ass) {
       if (e.start >= shiftAfter) { e.start -= shift; e.end -= shift; }
     }
-    silence.start -= shift;
-    silence.end -= shift;
+    for (const sl of silences) {
+      if (sl.start >= shiftAfter) { sl.start -= shift; sl.end -= shift; }
+    }
   }
 
   const total = segs.reduce((a, s) => a + s.outSec, 0) - shift;
-  return { segs, nar, dlg, ass, total, xfadeAfter: useXfade ? xfadeAfter : -1, xfadeSec: shift, silence, src };
+  silences.sort((a, b) => a.start - b.start);
+  return {
+    segs, nar, dlg, btn, ass, total,
+    xfadeAfter: useXfade ? xfadeAfter : -1, xfadeSec: shift,
+    silence, silences, src,
+  };
 }
 
 // ---------------------------------------------------------------- カット別レンダ
@@ -576,6 +656,9 @@ const DLG_CHAIN =
   `acompressor=threshold=0.10:ratio=3.5:attack=6:release=140:makeup=2,` +
   `aecho=0.8:0.7:20|40:0.25|0.15,alimiter=limit=0.94`;
 
+/** button = 「素の声」。演出を足さない（軽い整音だけ）。 */
+const BTN_CHAIN = `highpass=f=90,acompressor=threshold=0.12:ratio=2.5:attack=10:release=180:makeup=1,alimiter=limit=0.94`;
+
 async function compose(job, plan, cutFiles) {
   const p = jobPaths(job);
   const lines = [];
@@ -587,7 +670,8 @@ async function compose(job, plan, cutFiles) {
   // --- 入力インデックス ---------------------------------------------------
   const narBase = N;
   const dlgBase = narBase + plan.nar.length;
-  const bgmIdx = dlgBase + plan.dlg.length;
+  const btnBase = dlgBase + plan.dlg.length;
+  const bgmIdx = btnBase + plan.btn.length;
 
   // --- 各カットを揃える ---------------------------------------------------
   plan.segs.forEach((seg, k) => {
@@ -651,9 +735,14 @@ async function compose(job, plan, cutFiles) {
         `adelay=${ms}|${ms}[nr${k}]`
     );
   });
-  if (plan.nar.length === 1) lines.push(`[nr0]anull[narmix]`);
-  else lines.push(`${plan.nar.map((_, k) => `[nr${k}]`).join("")}amix=inputs=${plan.nar.length}:normalize=0:duration=longest[narmix]`);
-  lines.push(`[narmix]${NAR_CHAIN},volume=${NAR_VOL},apad,atrim=0:${total.toFixed(3)},asetpts=N/SR/TB[narv]`);
+  if (plan.nar.length === 0) {
+    // 案 B でナレが 1 本も無いジョブでもグラフが成立するようにする
+    lines.push(`anullsrc=r=48000:cl=stereo,atrim=0:${total.toFixed(3)},asetpts=N/SR/TB[narv]`);
+  } else {
+    if (plan.nar.length === 1) lines.push(`[nr0]anull[narmix]`);
+    else lines.push(`${plan.nar.map((_, k) => `[nr${k}]`).join("")}amix=inputs=${plan.nar.length}:normalize=0:duration=longest[narmix]`);
+    lines.push(`[narmix]${NAR_CHAIN},volume=${NAR_VOL},apad,atrim=0:${total.toFixed(3)},asetpts=N/SR/TB[narv]`);
+  }
 
   // --- 音: セリフレーン ---------------------------------------------------
   let dlgLabel = null;
@@ -669,6 +758,19 @@ async function compose(job, plan, cutFiles) {
     else lines.push(`${plan.dlg.map((_, k) => `[dl${k}]`).join("")}amix=inputs=${plan.dlg.length}:normalize=0:duration=longest[dlgmix]`);
     lines.push(`[dlgmix]${DLG_CHAIN},volume=${DLG_VOL},apad,atrim=0:${total.toFixed(3)},asetpts=N/SR/TB[dlgv]`);
     dlgLabel = "[dlgv]";
+  }
+
+  // --- 音: button レーン（素の声。残響は付けない）--------------------------
+  let btnLabel = null;
+  if (plan.btn.length) {
+    const e = plan.btn[0];
+    const ms = Math.round(e.at * 1000);
+    lines.push(
+      `[${btnBase}:a]aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,` +
+        `adelay=${ms}|${ms}[btn0]`
+    );
+    lines.push(`[btn0]${BTN_CHAIN},volume=${BTN_VOL},apad,atrim=0:${total.toFixed(3)},asetpts=N/SR/TB[btnv]`);
+    btnLabel = "[btnv]";
   }
 
   // --- ダッキングのキー（ナレ + セリフ） -----------------------------------
@@ -687,6 +789,7 @@ async function compose(job, plan, cutFiles) {
   // --- 音: BGM ------------------------------------------------------------
   const mixIn = ["[ambduck]", "[nar_main]"];
   if (dlgLabel) mixIn.push("[dlg_main]");
+  if (btnLabel) mixIn.push(btnLabel);
   if (bgm) {
     const bgmDur = await probeDuration(bgm);
     const loop = bgmDur < total ? `aloop=loop=-1:size=${Math.round(bgmDur * 48000)},` : "";
@@ -702,7 +805,10 @@ async function compose(job, plan, cutFiles) {
   }
 
   // --- 最終段: amix → loudnorm → alimiter → stopdown 無音 → aresample -----
-  const gate = `volume=enable='between(t\\,${plan.silence.start.toFixed(3)}\\,${plan.silence.end.toFixed(3)})':volume=0`;
+  // stopdown（黒＋完全無音）と telop_timing: on_silence の区間を全レーンまとめて落とす
+  const gate = (plan.silences ?? [plan.silence])
+    .map((sl) => `volume=enable='between(t\\,${sl.start.toFixed(3)}\\,${sl.end.toFixed(3)})':volume=0`)
+    .join(",");
   lines.push(
     `${mixIn.join("")}amix=inputs=${mixIn.length}:normalize=0:duration=longest,` +
       `atrim=0:${total.toFixed(3)},asetpts=N/SR/TB,` +
@@ -715,6 +821,7 @@ async function compose(job, plan, cutFiles) {
   for (const c of cutFiles) args.push("-i", rel(c));
   for (const e of plan.nar) args.push("-i", rel(e.file));
   for (const e of plan.dlg) args.push("-i", rel(e.file));
+  for (const e of plan.btn) args.push("-i", rel(e.file));
   if (bgm) args.push("-i", rel(bgm));
   args.push(
     "-/filter_complex", rel(p.fc),
@@ -755,7 +862,8 @@ export async function render(job, { force = false } = {}) {
   }
   console.log(`  ナレ: ${plan.nar.map((e) => `s${e.n}@${e.at.toFixed(2)}(${e.sec.toFixed(2)}s)`).join(", ")}`);
   console.log(`  セリフ: ${plan.dlg.map((e) => `s${e.n}@${e.at.toFixed(2)}(${e.sec.toFixed(2)}s)「${e.text}」`).join(", ") || "(なし)"}`);
-  console.log(`  無音（stopdown）: ${plan.silence.start.toFixed(2)}〜${plan.silence.end.toFixed(2)}s`);
+  console.log(`  button: ${plan.btn.map((e) => `@${e.at.toFixed(2)}(${e.sec.toFixed(2)}s)「${e.text}」`).join(", ") || "(なし)"}`);
+  console.log(`  無音区間: ${plan.silences.map((sl) => `${sl.start.toFixed(2)}〜${sl.end.toFixed(2)}s`).join(", ")}`);
 
   // --- テロップ ASS -------------------------------------------------------
   fs.writeFileSync(p.ass, buildAss(plan.ass), "utf8");
@@ -794,6 +902,7 @@ export async function render(job, { force = false } = {}) {
     cuts: nCut,
     cards: nCard,
     dialogue: plan.dlg.length,
+    button: plan.btn.length,
     ambient_vol: AMBIENT_VOL,
     bgm: info.bgm ? path.basename(info.bgm) : null,
   });

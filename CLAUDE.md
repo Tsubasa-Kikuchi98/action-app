@@ -17,7 +17,7 @@
 
 | 工程 | 手段 | 備考 |
 |---|---|---|
-| 台本生成 | OpenAI `gpt-5.6-luna` + Structured Outputs（json_schema, strict） | 出力: `{ title, scenes[]{ narration, telop, image_prompt, duration_sec } }` |
+| 台本生成 | OpenAI `gpt-5.6-luna` + Structured Outputs（json_schema, strict） | 出力: `{ title, tagline, presents, review_line, stake, button_line, style, release_line, cast_lines, interstitials, scenes[]{ narration, telop, dialogue, visual_metaphor, image_prompt, video_prompt, scene_type, cut_count, telop_timing, ... } }`。パロディの原理・視覚の翻訳文法は `PARODY_PRINCIPLES`（enrich.mjs）に集約 |
 | 画像生成 | OpenAI `gpt-image-2` / `1536x1024` / 開発中は `quality: "low"`、本番は `medium` | 写真ありは `images/edits` に参照画像を毎回添付。`Promise.all` で並列。Tier1 は 5枚/分。Phase 2 以降は動画の起点画像＋フォールバック |
 | 動画生成（Phase 2） | Google Gemini API **Veo 3.1 Lite** `veo-3.1-lite-generate-preview` / 720p / image-to-video / 4・6・8 秒 | $0.05/秒、無料枠なし。音声は常に同梱（環境音として採用、`no dialogue, no speech` をプロンプトに固定）。生成 11秒〜最大6分・非同期ポーリング。生成物はサーバ保持2日 → 即DL。失敗時はそのシーンだけ静止画 Ken Burns にフォールバック。品質向上時は `veo-3.1-fast-generate-preview` にモデル名差し替え |
 | ナレーション | OpenAI `gpt-4o-mini-tts` / voice `cedar` / `response_format: "wav"` / `speed` 1.0 | `instructions` は openai.fm 公式のラベル形式。共通ブロック ＋ scene_type 別ブロック。生成後に前後の無音を自動トリム |
@@ -52,7 +52,8 @@ docs/              企画・調査資料
 - `GEMINI_API_KEY`（Phase 2 動画生成。Google AI Studio で発行＋課金有効化）
 - `ELEVENLABS_API_KEY`（BGM を API で作る場合のみ）
 - `TTS_SPEED`（既定 **1.0**）、`TTS_VOICE`（既定 cedar）、`TTS_TRIM`（既定 on）、`IMG_QUALITY`（既定 low）、`IMG_SIZE`（既定 1536x1024）
-- Phase 3 の演出調整: `AMBIENT_VOL`（既定 **0.9**）、`AMBIENT_TARGET_DB`（既定 -20）、`DLG_VOL`、`BGM_VOL`、`XFADE_SEC`、`LETTERBOX`、`PRESENTS_SEC` / `INTER_SEC` / `STOPDOWN_SEC` / `TITLE_SEC`、`VEO_GEN_SEC`（既定 8）
+- Phase 3 の演出調整: `AMBIENT_VOL`（既定 **0.9**）、`AMBIENT_TARGET_DB`（既定 -20）、`DLG_VOL` / `BTN_VOL`、`BGM_VOL`、`XFADE_SEC`、`LETTERBOX`、`PRESENTS_SEC` / `REVIEW_SEC` / `INTER_SEC` / `STOPDOWN_SEC` / `TITLE_SEC` / `BUTTON_MIN` / `BUTTON_MAX` / `SILENT_TELOP_SEC`、`VEO_GEN_SEC`（既定 8）
+- 台本の型: `TRAILER_STYLE`（`narration` 既定 / `dialogue`。`node scripts/script.mjs ... --style=dialogue` でも指定可）、`NAR_TOTAL_MAX`（既定 80）
 
 ## ffmpeg / Windows の注意（実機で確認済み・必ず守る）
 
@@ -108,7 +109,15 @@ docs/              企画・調査資料
 - [x] ナレ＝語り、テロップ＝断言の役割分離。数字・期限・二択を必ず 1 つ。結末を示さない。三点リーダーで間を作る
 - [x] `dialogue`（決め台詞 2〜3 本）／`screen_text`（画面内の小テロップ）／`tagline`／`interstitials`／`release_line`／`presents`／`cast_lines` をスキーマに追加
 - [x] `scripts/enrich.mjs` で**既存フィールドを一切変えずに**旧 script.json を拡張できるようにした（Veo を再生成せず演出だけ載せられる）
-- [ ] 最終シーンは「無音＋テロップ」等の余韻パターンを選べるようにする（stopdown で代替済み・パターン化は未実装）
+- [x] 最終シーンは「無音＋テロップ」等の余韻パターンを選べるようにする → `telop_timing: "on_silence"`（声を言い切った直後に全レーンを 0.4 秒落として文字だけ残す）で実装
+- [x] **コンセプトの実装**: docs/trailer-tropes.md（パロディの原理・視覚の翻訳文法 10・変換例 8・笑いのコツ・NG・禁句・テロップ型カタログ）を `PARODY_PRINCIPLES` として enrich.mjs に集約し、script.mjs / enrich.mjs の両プロンプトで共有
+- [x] **反撃・復旧パートの翻訳**（docs/trailer-tropes.md §5「召集 → 出動・移動 → 突入 → 作戦会議 → 決着」）をプロンプトに追加。montage / resolve は必ずここから選ばせ、montage は 1〜1.5 秒カット用の移動・突入素材にする。Veo が弾く「割れる瞬間の破片・武器」も禁止に追加
+- [x] スキーマ追加: `button_line`（タイトル後の落ち）／`review_line`（煽りテロップのパロディ）／`stake`（賭け金の数値表現）／`style`（narration | dialogue）／シーンの `visual_metaphor`（現実 → 演出の翻訳 1 行）／`telop_timing` に `on_silence`
+- [x] `duration_sec` のランプを 6,4,4,6,4（montage 最長）に、`cut_count` 上限を montage だけ 6 に
+- [x] `lintScript()`（$0）で禁句・ナレ合計字数（80 字）・stake の数字・中間カード位置・テロップ重複・セリフ本数を warn（**削除はしない**）
+- [x] 案 B（`--style=dialogue` / env `TRAILER_STYLE`）: ナレ 2 本＋セリフ 4 本＋文字カード主導。narration が空のシーンは TTS を作らず nar_sec=0・尺は台本値
+- [ ] 案 A / 案 B を**実映像**で比較する（`out/demo4`（案 A）・`out/demo5`（案 B）は台本と音声のみ。画像・動画は未生成）
+- [ ] 台本 1 本の実コストが $0.045〜0.054（reasoning 2.3〜3.1k tok）。プロンプトが長いので圧縮するか、キャッシュ前提で運用する
 #### C. ナレーション（narration.mjs、$0.01）— **完了**
 - [x] `TTS_SPEED` を 1.0 に戻し、速度は `Pacing:` で制御
 - [x] `instructions` を openai.fm 公式のラベル形式（空行区切り）に。共通ブロック ＋ scene_type 別ブロック（囁き→加速→張る）

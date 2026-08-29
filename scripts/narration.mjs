@@ -1,4 +1,4 @@
-// ③ ナレーション & セリフ: script.json → out/<job>/nar/sN.wav ・ out/<job>/dlg/sN.wav
+// ③ ナレーション & セリフ: script.json → out/<job>/nar/sN.wav ・ out/<job>/dlg/sN.wav ・ out/<job>/dlg/button.wav
 // 使い方: node scripts/narration.mjs <job> [--force]
 //
 // - ナレーション: gpt-4o-mini-tts（既定 voice cedar / wav）。instructions は openai.fm 公式形式
@@ -77,6 +77,24 @@ Emphasis: Let the final phrase drop to the bottom of the register and stop dead.
 export function narrationInstructions(sceneType) {
   const extra = NARRATION_BY_TYPE[sceneType] ?? NARRATION_BY_TYPE.setup;
   return `${NARRATION_COMMON}\n\n${extra}`;
+}
+
+/**
+ * button_line（タイトル後の落ち）の演技指示。
+ * ここだけは「予告の声」を降ろして、現実に戻った素の一言にする（笑いの落差はここで作る）。
+ */
+export function buttonInstructions() {
+  return `Voice Affect: An ordinary person in an ordinary office. No trailer voice at all — the performance drops completely.
+
+Tone: Flat, tired, matter-of-fact. Slightly deflated. Absolutely not dramatic.
+
+Pacing: Normal conversational speed. One short line, then stop.
+
+Emotion: Resignation. The crisis is over and the paperwork is not.
+
+Pronunciation: Everyday spoken Japanese, relaxed and unprojected.
+
+Punctuation: End plainly. No emphasis, no held vowels, no reverb-worthy finish.`;
 }
 
 /** セリフの演技指示。scene_type で強度を変える。 */
@@ -175,7 +193,8 @@ export async function generateNarration(job, { force = false } = {}) {
   const dlgCount = view.scenes.filter((s) => s.dialogue).length;
   console.log(
     `[narration] ${MODELS.tts} / nar voice=${voice} / speed=${speed} / wav / ` +
-      `ナレ ${data.scenes.length}件 + セリフ ${dlgCount}件 / ` +
+      `ナレ ${view.scenes.filter((s) => s.narration).length}件 + セリフ ${dlgCount}件` +
+      `${view.button_line ? " + button 1件" : ""} / ` +
       `尺の丸め: ${round ? VEO_STEPS.join("/") + "s" : "off（連続値）"}`
   );
 
@@ -186,6 +205,15 @@ export async function generateNarration(job, { force = false } = {}) {
     const file = path.join(p.nar, `s${n}.wav`);
 
     // --- ナレーション -----------------------------------------------------
+    // 案 B（style: "dialogue"）はナレが 2 本しかない。narration が空のシーンは
+    // TTS を作らず nar_sec = 0 として、シーン尺は台本の duration_sec（既定 4）に任せる。
+    if (!String(scene.narration ?? "").trim()) {
+      scene.nar_sec = 0;
+      scene.base_sec = scene.base_sec ?? scene.duration_sec ?? 4;
+      scene.duration_sec = round ? roundSceneSec(scene.base_sec) : scene.base_sec;
+      if (fs.existsSync(file)) fs.rmSync(file);
+      console.log(`  s${n}: [${v.scene_type}] ナレなし → scene ${scene.duration_sec}s`);
+    } else {
     if (force || !fs.existsSync(file) || fs.statSync(file).size === 0) {
       const r = await tts(job, {
         file,
@@ -208,6 +236,7 @@ export async function generateNarration(job, { force = false } = {}) {
     scene.duration_sec = round ? roundSceneSec(need) : Number(need.toFixed(2));
     const mark = scene.duration_sec !== before ? ` → ${scene.duration_sec}s に補正` : "";
     console.log(`  s${n}: [${v.scene_type}] nar ${narSec.toFixed(2)}s / scene ${before}s${mark}`);
+    }
 
     // --- セリフ -----------------------------------------------------------
     const dlgFile = path.join(p.dlg, `s${n}.wav`);
@@ -231,6 +260,29 @@ export async function generateNarration(job, { force = false } = {}) {
       // 台本からセリフが消えた場合は古い wav を残さない（render が拾ってしまうため）
       if (fs.existsSync(dlgFile)) fs.rmSync(dlgFile);
     }
+  }
+
+  // --- button_line（タイトル後の落ち）-------------------------------------
+  // シーンには属さないので dlg/button.wav に置く。render がタイトルカードの後に鳴らす。
+  const btnFile = path.join(p.dlg, "button.wav");
+  if (view.button_line) {
+    const bv = dialogueVoice("male_mature", voice);
+    if (force || !fs.existsSync(btnFile) || fs.statSync(btnFile).size === 0) {
+      const r = await tts(job, {
+        file: btnFile,
+        text: view.button_line,
+        voice: bv,
+        instructions: buttonInstructions(),
+        step: "tts-button",
+        meta: { kind: "button", voice: bv },
+      });
+      cost += r.cost;
+    }
+    data.button_sec = Number((await probeDuration(btnFile)).toFixed(2));
+    console.log(`  button「${view.button_line}」 voice=${bv} ${data.button_sec}s`);
+  } else {
+    delete data.button_sec;
+    if (fs.existsSync(btnFile)) fs.rmSync(btnFile);
   }
 
   writeScript(job, data);
