@@ -34,11 +34,8 @@ const raw = (types, over = {}) => ({
 const opts = { model: "test-model", createdAt: "2026-01-01T00:00:00.000Z", warn: () => {} };
 const run = (data, style = "narration") => normalize(data, "エピソード", style, opts);
 
-// 排他ルールの実装上の事実（2026-08-30 時点）:
-//   normalize は voiceScene（turn / montage）で narrationText を空にする計算をしているが、
-//   返り値の narration には**生の s.narration** を入れている。
-//   つまり実際に落ちるのは「ナレのあるシーンのセリフ」だけで、ナレは落ちない。
-//   render は narration があればナレ wav を鳴らすので、これは既知の食い違い（挙動維持のためテストは実装に合わせる）。
+// 排他ルール（2026-08-30 修正済み）: turn / montage はセリフ優先でナレを空にし、
+// cold_open / setup / resolve はナレ優先でセリフを空にする。
 test("turn / montage はセリフを必ず残す（セリフ優先）", () => {
   const withDlg = raw(["cold_open", "setup", "turn", "montage", "resolve"]);
   withDlg.scenes[2].dialogue = "まだ終わってない";
@@ -46,8 +43,8 @@ test("turn / montage はセリフを必ず残す（セリフ優先）", () => {
   const e = run(withDlg);
   assert.equal(e.scenes[2].dialogue, "まだ終わってない", "turn のセリフは残る");
   assert.equal(e.scenes[3].dialogue, "全員、動け", "montage のセリフは残る");
-  // narration は現状クリアされない（上記コメントの既知の食い違い）
-  assert.equal(e.scenes[2].narration, "その日……すべては静かに始まった。");
+  assert.equal(e.scenes[2].narration, "", "turn はセリフがあるのでナレを落とす");
+  assert.equal(e.scenes[3].narration, "", "montage はセリフがあるのでナレを落とす");
 });
 
 test("cold_open / setup / resolve はナレ優先でセリフを落とす", () => {

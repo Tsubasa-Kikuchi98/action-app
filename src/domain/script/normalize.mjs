@@ -57,7 +57,7 @@ export function normalize(data, episode, style = DEFAULT_STYLE, opts = {}) {
     if (timing === "on_silence" && ++onSilence > 1) timing = "cut_head";
 
     return {
-      narration: oneLine(s.narration),
+      narration: oneLine(narrationText),
       telop: oneLine(s.telop).slice(0, 15),
       image_prompt: String(s.image_prompt ?? "").trim(),
       video_prompt: String(s.video_prompt ?? "").trim(),
