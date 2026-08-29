@@ -129,7 +129,7 @@ docs/              企画・調査資料
 - [x] Veo プロンプトを **motion-first テンプレート**に更新（camera_beat / motion_beat / env_beat / `Ambient noise:` / セリフは引用符）。`--dry-run` で API を呼ばずに確認できる
 - [x] 8 秒生成 → render 側で前半だけ使う設計に変更（`VEO_GEN_SEC` 既定 8、`VEO_BUDGET_SEC` 48）
 - [ ] 実際に Veo を再生成する（5 シーン × 8 秒 = $2.00。`node scripts/video.mjs demo3 --force`）
-- [ ] 起点画像のプロンプト改善（舞台を 3 箇所以上・ショットサイズ・脅威の可視化）→ script.mjs 側は実装済み、再生成は $0.08
+- [x] 起点画像のプロンプト改善 → demo4 で実施（石板崩落／赤灯の保管庫／金庫室／夜の街の部隊／逆再生の破片）
 - [ ] Lite で 1〜2 本比較 → 不足なら Fast を 1 本（要確認）
 #### E. 評価
 - [x] イテレーション 1 完了、菊池の採点待ち（`out/demo3/trailer.mp4` 35.7 秒 / 14 カット / セリフ 3 本 / −13.7 LUFS）
