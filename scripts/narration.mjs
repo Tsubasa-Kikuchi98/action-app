@@ -20,13 +20,29 @@ export const TTS_INSTRUCTIONS = `ハリウッド映画の予告編ナレータ�
 // ナレ後の余白（秒）。シーン尺はこの分だけナレより長くする。
 const TAIL_PAD = 0.6;
 
+// Phase 2: Veo が受け付ける尺は 4 / 6 / 8 秒のみ。ナレ実尺 + TAIL_PAD をこの中に丸め上げる。
+// SCENE_ROUND=off で Phase 1 相当の連続値に戻す（--stills 運用など）。
+export const VEO_STEPS = [4, 6, 8];
+const roundingEnabled = () => (process.env.SCENE_ROUND ?? "on").toLowerCase() !== "off";
+
+/** sec 以上で最小の許容尺を返す（超過分は最大値でクランプ）。 */
+export function roundSceneSec(sec) {
+  const max = Number(process.env.VEO_MAX_SEC ?? VEO_STEPS[VEO_STEPS.length - 1]);
+  const steps = VEO_STEPS.filter((v) => v <= max);
+  return steps.find((v) => v >= sec - 1e-6) ?? steps[steps.length - 1];
+}
+
 export async function generateNarration(job, { force = false } = {}) {
   const openai = getOpenAI();
   const p = ensureDirs(job, "nar");
   const data = readScript(job);
   const voice = process.env.TTS_VOICE ?? "cedar";
+  const round = roundingEnabled();
 
-  console.log(`[narration] ${MODELS.tts} / voice=${voice} / wav / ${data.scenes.length}件`);
+  console.log(
+    `[narration] ${MODELS.tts} / voice=${voice} / wav / ${data.scenes.length}件 / ` +
+      `尺の丸め: ${round ? VEO_STEPS.join("/") + "s" : "off（連続値）"}`
+  );
 
   let cost = 0;
   for (const [i, scene] of data.scenes.entries()) {
@@ -72,8 +88,9 @@ export async function generateNarration(job, { force = false } = {}) {
     // 台本の元尺を base_sec に保持（再実行時にナレが短くなったら尺も縮められるように）
     const before = scene.base_sec ?? scene.duration_sec;
     scene.base_sec = before;
-    scene.duration_sec = Number(Math.max(before, narSec + TAIL_PAD).toFixed(2));
-    const mark = scene.duration_sec > before ? ` → ${scene.duration_sec}s に補正` : "";
+    const need = Math.max(before, narSec + TAIL_PAD);
+    scene.duration_sec = round ? roundSceneSec(need) : Number(need.toFixed(2));
+    const mark = scene.duration_sec !== before ? ` → ${scene.duration_sec}s に補正` : "";
     console.log(`  s${n}: nar ${narSec.toFixed(2)}s / scene ${before}s${mark}`);
   }
 

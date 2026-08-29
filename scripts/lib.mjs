@@ -9,6 +9,7 @@ import path from "node:path";
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import OpenAI from "openai";
+import { GoogleGenAI } from "@google/genai";
 
 export const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -22,11 +23,23 @@ export function getOpenAI() {
   return _openai;
 }
 
+// ---------------------------------------------------------------- Gemini（Veo）
+let _genai = null;
+export function getGemini() {
+  if (!process.env.GEMINI_API_KEY) {
+    throw new Error("GEMINI_API_KEY が未設定です（.env を確認してください）");
+  }
+  _genai ??= new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+  return _genai;
+}
+
 // ---------------------------------------------------------------- モデル名
 export const MODELS = {
   script: process.env.SCRIPT_MODEL ?? "gpt-5.6-luna",
   image: process.env.IMG_MODEL ?? "gpt-image-2",
   tts: process.env.TTS_MODEL ?? "gpt-4o-mini-tts",
+  // Phase 2: 動画生成（Google Gemini API）。品質を上げるなら veo-3.1-fast-generate-preview
+  video: process.env.VEO_MODEL ?? "veo-3.1-lite-generate-preview",
 };
 
 // 推定コスト用の単価（USD）。実請求額は OpenAI のダッシュボードで確認すること。
@@ -44,12 +57,16 @@ export const PRICES = {
   },
   // 画像: 1枚あたり（1536x1024 / low の概算）
   "gpt-image-2": { perImage: Number(process.env.PRICE_IMAGE_LOW ?? 0.016) },
+  // 動画: 生成1秒あたり（Veo 3.1 Lite 720p は $0.05/秒・無料枠なし）
+  "veo-3.1-lite-generate-preview": { perSec: Number(process.env.PRICE_VEO_LITE ?? 0.05) },
+  "veo-3.1-fast-generate-preview": { perSec: Number(process.env.PRICE_VEO_FAST ?? 0.15) },
 };
 
 export function estimateCost(model, usage = {}) {
   const p = PRICES[model];
   if (!p) return 0;
   if (p.perImage != null) return p.perImage * (usage.images ?? 1);
+  if (p.perSec != null) return p.perSec * (usage.video_sec ?? 0);
   const inTok = usage.input_tokens ?? usage.prompt_tokens ?? 0;
   const outTok = usage.output_tokens ?? usage.completion_tokens ?? 0;
   return (inTok / 1e6) * p.in + (outTok / 1e6) * p.out;
@@ -68,6 +85,7 @@ export function jobPaths(job) {
     script: path.join(d, "script.json"),
     log: path.join(d, "log.jsonl"),
     img: path.join(d, "img"),
+    vid: path.join(d, "vid"),
     nar: path.join(d, "nar"),
     telop: path.join(d, "telop"),
     scenes: path.join(d, "scenes"),

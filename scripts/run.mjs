@@ -1,8 +1,13 @@
 // ①〜⑤ を順に実行する一気通貫スクリプト。
-// 使い方: node scripts/run.mjs "<エピソード文>" <job> [--force] [--skip-script]
+// 使い方: node scripts/run.mjs "<エピソード文>" <job> [--force] [--skip-script] [--stills]
 //   npm run trailer -- "<エピソード文>" demo1
 //
-// 各工程の所要秒 / API usage / 推定コスト合計を表示する。
+// 流れ（Phase 2）:
+//   ① 台本 → ｛② 画像 ‖ ③' ナレーション ‖ ④ BGM｝並列 → ③ 動画(Veo) → ⑤ 合成
+//   ③ を並列グループに入れないのは、起点画像（②）と 4/6/8 に丸めた尺（③'）の両方に依存するため。
+//   --stills を付けると ③ をスキップして Phase 1 相当（静止画 Ken Burns のみ）になる。
+//
+// 各工程の所要秒 / API usage / 推定コスト合計（Veo の秒数を含む）を表示する。
 import fs from "node:fs";
 import {
   jobPaths, summarizeLog, probeSummary, fmtUSD, isMain,
@@ -10,10 +15,11 @@ import {
 import { generateScript } from "./script.mjs";
 import { generateImages } from "./images.mjs";
 import { generateNarration } from "./narration.mjs";
+import { generateVideos } from "./video.mjs";
 import { prepareBgm } from "./bgm.mjs";
 import { render } from "./render.mjs";
 
-export async function runAll(episode, job, { force = false, skipScript = false } = {}) {
+export async function runAll(episode, job, { force = false, skipScript = false, stills = false } = {}) {
   const p = jobPaths(job);
   const steps = [];
   const t0 = Date.now();
@@ -35,10 +41,21 @@ export async function runAll(episode, job, { force = false, skipScript = false }
     await step("① 台本", () => generateScript(episode, job));
   }
 
-  // ② 画像 / ③ ナレーション / ④ BGM
-  await step("② 画像", () => generateImages(job, { force }));
-  await step("③ ナレーション", () => generateNarration(job, { force }));
-  await step("④ BGM", () => prepareBgm(job, { force }));
+  // ② 画像 ‖ ③' ナレーション ‖ ④ BGM（互いに独立なので並列）
+  //   ※ script.json を書き戻すのは narration だけ。images / bgm は読むだけなので競合しない。
+  const par = await step("②③'④ 並列", async () => {
+    const [img, nar, bgm] = await Promise.all([
+      generateImages(job, { force }),
+      generateNarration(job, { force }),
+      prepareBgm(job, { force }),
+    ]);
+    return { cost: (img?.cost ?? 0) + (nar?.cost ?? 0) + (bgm?.cost ?? 0) };
+  });
+
+  // ③ 動画（Veo）: 起点画像と確定した duration_sec が必要なので並列グループの後
+  const vid = await step(stills ? "③ 動画(skip)" : "③ 動画", () =>
+    generateVideos(job, { force, stills })
+  );
 
   // ⑤ 合成（台本・ナレの尺が変わっている可能性があるので常に作り直す）
   await step("⑤ 合成", () => render(job, { force: true }));
@@ -70,6 +87,14 @@ export async function runAll(episode, job, { force = false, skipScript = false }
   }
   console.log(`  合計推定コスト: ${fmtUSD(totalCost)} ※単価は lib.mjs の PRICES（目安値）`);
 
+  // Veo の内訳
+  const veoSec = rows.filter((r) => r.step === "video" && r.ok).reduce((a, r) => a + (r.usage?.video_sec ?? 0), 0);
+  const veoCost = rows.filter((r) => r.step === "video" && r.ok).reduce((a, r) => a + (r.cost_usd ?? 0), 0);
+  console.log(
+    `\nVeo: 動画 ${vid?.videoCount ?? 0} シーン / 静止画フォールバック ${vid?.stillCount ?? 0} シーン` +
+      ` / 生成 ${veoSec}s = ${fmtUSD(veoCost)}（log.jsonl 累計）`
+  );
+
   // 出力の確認
   const info = await probeSummary(p.trailer);
   const v = info.streams.find((s) => s.codec_type === "video") ?? {};
@@ -89,11 +114,12 @@ if (isMain(import.meta.url)) {
   const pos = args.filter((a) => !a.startsWith("--"));
   const [episode, job = "demo1"] = pos;
   if (!episode) {
-    console.error('usage: node scripts/run.mjs "<エピソード文>" <job> [--force] [--skip-script]');
+    console.error('usage: node scripts/run.mjs "<エピソード文>" <job> [--force] [--skip-script] [--stills]');
     process.exit(1);
   }
   await runAll(episode, job, {
     force: flags.includes("--force"),
     skipScript: flags.includes("--skip-script"),
+    stills: flags.includes("--stills"),
   });
 }

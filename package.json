@@ -23,6 +23,7 @@
   "homepage": "https://github.com/Tsubasa-Kikuchi98/action-app#readme",
   "type": "module",
   "dependencies": {
+    "@google/genai": "^2.19.0",
     "dotenv": "^17.4.2",
     "openai": "^7.8.0"
   }
