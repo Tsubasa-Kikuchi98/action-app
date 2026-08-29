@@ -111,16 +111,17 @@ Punctuation: End hard. No trailing softness.`;
 
 /** speaker → TTS voice。ナレーション voice とは必ず別の声にする。 */
 export const SPEAKER_VOICES = {
-  male_young: ["ash", "onyx"],
-  male_mature: ["onyx", "ash"],
-  female_young: ["nova", "shimmer"],
-  female_mature: ["shimmer", "nova"],
-  none: ["ash", "onyx"],
+  hero:   ["echo", "verse"],      // 若手男性
+  senpai: ["nova", "marin"],      // 30 代前半女性
+  boss:   ["onyx", "ash"],        // 50 代男性
+  // 旧台本互換
+  male_young: ["echo", "verse"], female_young: ["nova", "marin"], female_mature: ["nova", "marin"], male_mature: ["onyx", "ash"],
+  none: ["echo", "onyx"],
 };
 
 export function dialogueVoice(speaker, narVoice) {
   const cands = SPEAKER_VOICES[speaker] ?? SPEAKER_VOICES.none;
-  return cands.find((v) => v !== narVoice) ?? "ash";
+  return cands.find((v) => v !== narVoice) ?? "echo";
 }
 
 // ナレ後の余白（秒）。シーン尺はこの分だけナレより長くする。

@@ -5,6 +5,7 @@
 // 既存ファイルはスキップ（--force で再生成）。429/5xx は指数バックオフでリトライ。
 import fs from "node:fs";
 import path from "node:path";
+import { castDescription } from "./enrich.mjs";
 import { getOpenAI, MODELS, ensureDirs, readScript, timed, withRetry, fmtUSD, isMain } from "./lib.mjs";
 
 // 全カットの見た目を揃えるための共通スタイル接尾辞。
@@ -28,7 +29,8 @@ export async function generateImages(job, { force = false } = {}) {
       console.log(`  s${n}: skip (既存)`);
       return { n, file, skipped: true, cost: 0, sec: 0 };
     }
-    const prompt = `${scene.image_prompt}. ${STYLE_SUFFIX}`;
+    const cast = castDescription(scene.characters);
+    const prompt = `${scene.image_prompt}.${cast ? ` Characters (keep exactly this appearance): ${cast}.` : ""} ${STYLE_SUFFIX}`;
 
     const { result, sec, cost } = await timed(
       job,

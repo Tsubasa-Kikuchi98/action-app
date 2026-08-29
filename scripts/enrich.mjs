@@ -17,7 +17,20 @@ import {
 } from "./lib.mjs";
 
 export const SCENE_TYPES = ["cold_open", "setup", "turn", "montage", "resolve"];
-export const SPEAKERS = ["none", "male_young", "male_mature", "female_young", "female_mature"];
+// 固定キャスト（2026-08-30 決定）。声を持つのはこの 3 人だけ。それ以外の登場人物は無言。
+export const CAST = {
+  hero:   { jp: "主人公（若手の男性社員）", role: "失敗をする当事者。前に出て動く",
+            en: "the protagonist: a Japanese man in his mid-20s, short black hair, white shirt with sleeves rolled up, no tie, lanyard ID card" },
+  senpai: { jp: "先輩（30 代前半の女性社員）", role: "失敗に最初に気づく。冷静に状況を掴む",
+            en: "the senior colleague: a Japanese woman in her early 30s, shoulder-length dark hair tied back, dark navy blazer over a light blouse" },
+  boss:   { jp: "上司（50 代の男性社員）", role: "責任を負い、指示を出し、外部へ連絡する",
+            en: "the boss: a Japanese man in his 50s, gray-streaked hair, dark suit, no glasses, calm heavy presence" },
+};
+export const SPEAKERS = ["none", "hero", "senpai", "boss"];
+// 旧台本の話者キーを新キャストへ
+export const LEGACY_SPEAKER = { male_young: "hero", female_young: "senpai", female_mature: "senpai", male_mature: "boss" };
+export const castDescription = (keys = []) =>
+  (Array.isArray(keys) ? keys : []).filter((k) => CAST[k]).map((k) => CAST[k].en).join("; ");
 // on_silence = 環境音とナレを一瞬だけ落として「テロップだけ」を見せる（render が 0.4 秒ゲートする）
 export const TELOP_TIMINGS = ["cut_head", "after_narration", "on_silence"];
 
@@ -109,7 +122,7 @@ export function enrichedView(data) {
       camera_beat: String(s.camera_beat ?? "").trim() || DEFAULT_CAMERA_BEAT[type],
       ambient: String(s.ambient ?? "").trim(),
       dialogue: enriched ? String(s.dialogue ?? "").trim() : "",
-      speaker: SPEAKERS.includes(s.speaker) ? s.speaker : "none",
+      speaker: SPEAKERS.includes(s.speaker) ? s.speaker : (LEGACY_SPEAKER[s.speaker] ?? "none"),
       telop_timing: TELOP_TIMINGS.includes(s.telop_timing)
         ? s.telop_timing
         : DEFAULT_TELOP_TIMING[type],
@@ -167,7 +180,7 @@ export const PARODY_PRINCIPLES = `# このコンテンツの正体（最重要�
 2. **誇張してよいのは、語り口・カメラ・音・カードの重厚さだけ。** 中身（何が起きたか）は誇張しない。
 3. **賭け金は具体的な数値にする。小さいほど可笑しい。**（「被害総額 1,200 円」「残された時間は 3 分」「復旧まであと 2 コマンド」）
 4. **登場人物は最後まで真顔。** 誰一人ふざけない。観客だけが笑う構造にする。
-5. **起こったことは、そのまま映す。誇張するのは「演出」だけ。** 出来事を別の物に置き換えない（サーバ障害を「城門」や「石板」や「砂漠」にしない）。観客が 1 秒で「何が起きているか」分かる絵にした上で、照明・天候・カメラ・スケール・周囲の反応・物理エフェクトを映画級に盛る。
+5. **起こったことは、そのまま映す。ただし「アクション映画で起きること」を実物に起こす。** 出来事を別の物に置き換えない（サーバ障害を「城門」や「石板」や「砂漠」にしない）。観客が 1 秒で「何が起きているか」分かる絵にした上で、**実物のサーバーが火花を上げて爆発する、主人公が走り出した特急に飛び乗る、上司が自動ドアを蹴り開けて入ってくる**、というアクション映画級の出来事・動き・スケールで撮る。**これは「アクション映画の予告」である。オフィスの静かなドラマにしてはいけない。**
 6. **解決は映さない。** 予告は「解決したかどうか分からない所」で終わる。復旧完了・夜明け・カウントダウン停止・逆再生・「静かになった」は禁止。最後のシーンは行動の直前か最中（受話器を取る、Enter に指が触れる、扉を開ける寸前）で切る。
 
 # 視覚の演出文法（image_prompt / motion_beat / visual_metaphor はこれに従う）
@@ -178,6 +191,17 @@ export const PARODY_PRINCIPLES = `# このコンテンツの正体（最重要�
 - スケール: 画面の数字が壁一面に投影される、廊下が異様に長い、部下が整列している、モニターが数十台並ぶ
 - 周囲の反応: フロア全員が一斉に振り返る、書類が舞う、静まり返る、誰かがコップを落とす
 - 物理エフェクト（実物に起きる範囲で）: サーバーラックから火花と煙、モニターが火を噴く、ケーブルが弾ける、照明が順に落ちる
+
+**アクション映画の要素カタログ（各シーンに必ず 1 つ以上入れる。montage は 2 つ以上）**
+- 爆発・火花・煙: サーバーラックや PC・モニターが火花を噴き、爆発し、煙が天井を這う。スプリンクラーが一斉に作動する
+- 疾走・追走: ホームを全力疾走、走り出した特急のデッキに飛び乗る、雨の高速をタクシーが疾走、階段を駆け上がる、廊下を走る
+- 突入・蹴り開け: 自動ドアを蹴り開けてスローで入場、サーバールームの重い扉が開く、会議室のドアを両手で開け放つ
+- 落下・崖際: 屋上の縁、ビルの窓際から見下ろす街、エレベーターの緊急停止
+- 群衆・部隊: 部下が整列、フロア全員が一斉に立ち上がる、複数の社員が同時に走り出す
+- 天候・光: 豪雨、雷、逆光、赤い警報光が回る、停電して非常灯だけ
+- スローモーション: Enter を押す指、振り返る顔、飛び散る書類、受話器を取る手
+- 乗り物: 特急、タクシー、バイク、ヘリの音（ヘリからのロープ降下は「窓から入った直後」で描く）
+- カウントダウン・巨大な数字: 壁一面に映る請求額、時計、赤いデジタル表示
 
 出来事別の演出（**出来事は変えず、撮り方を盛る**）:
 1. **データ消失・障害** → 実物のサーバー/PC から火花・煙、画面が次々黒く落ちる、警報光
@@ -204,6 +228,15 @@ export const PARODY_PRINCIPLES = `# このコンテンツの正体（最重要�
 - 深夜の障害コール → 暗い寝室でスマホが光る。飛び起きてノート PC を掴み、玄関を開けると豪雨
 - 本部長を呼ぶ → 逆光の長い廊下を、本部長がゆっくり歩いてくる。両脇のデスクの社員が立ち上がる
 - AWS へ謝罪の電話 → 会議室、本部長が受話器を取り、深く息を吸う。ローアングル。相手は映さない ── ここで切る
+
+# 登場人物（固定キャスト・厳守）
+- **主人公＝若手の男性社員**: 失敗をする当事者。前に出て動く（speaker: hero）
+- **先輩＝30 代前半の女性社員**: 失敗に最初に気づく。冷静に状況を掴む（speaker: senpai）
+- **上司＝50 代の男性社員**: 責任を負い、指示を出し、外部へ連絡する（speaker: boss）
+- 役割分担は入れ替えない（失敗＝主人公、発覚＝先輩、指示・責任＝上司）。エピソード中の人物は必ずこの 3 人に割り当てる: 「失敗した社員」＝主人公、「気づいた別の社員」＝先輩、「本部長・部長・上司・責任者」＝**上司本人**。
+- **上司は自分自身を呼ばない**（上司のセリフは「俺が電話する」「全員、動け」のような指示・宣言）。「本部長を呼ぶ」のは主人公か先輩のセリフ。
+- **声を持つのはこの 3 人だけ**。それ以外の登場人物（フロアの社員、部下、通行人）は登場させてよいが無言。セリフは必ず hero / senpai / boss のいずれかが言う。
+- 各シーンの characters に、その画面に映る主要人物を列挙する（外見はコード側で統一して付与するので、image_prompt では「主人公」「先輩」「上司」の呼び方だけでよい）。
 
 # 笑いの作り方
 - **大仰なナレーションで、極小の事物を語る**（「この国は、紙で動く」→ 映るのは朱肉と三文判）

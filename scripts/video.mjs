@@ -16,6 +16,7 @@
 //     （render.mjs の静止画経路と同じ「拡大してから中央クロップ」なので画角が揃う）。
 import fs from "node:fs";
 import path from "node:path";
+import { castDescription } from "./enrich.mjs";
 import {
   getGemini, MODELS, ensureDirs, readScript, writeScript, jobPaths,
   timed, withRetry, probeDuration, sleep, fmtUSD, isMain, PRICES, ffmpeg,
@@ -93,6 +94,8 @@ export function buildVideoPrompt(scene) {
   // 「どのアクション演出に翻訳したか」を持ち、motion_beat / image_prompt はそれに沿って書かれている。
   // Veo に渡すのは英語のみなので、ここでは motion_beat をそのまま使い、
   // 無い旧台本だけ video_prompt / image_prompt から動きを拾う（--dry-run で翻訳を目視確認する）。
+  const cast = castDescription(scene.characters);
+  const castLine = cast ? ` The people on screen are ${cast}; keep their faces, hair and clothing exactly as in the source image.` : "";
   const action =
     motion ||
     scene.video_prompt?.trim() ||
@@ -102,16 +105,18 @@ export function buildVideoPrompt(scene) {
     `${cap(camera)}.`,
     `${cap(action)}${/[.!?]$/.test(action) ? "" : "."}`,
     `Secondary motion: ${env}.`,
-    `The scene keeps the exact lighting, color and framing of the source image.`,
+    `The scene keeps the exact lighting, color and framing of the source image.${castLine}`,
     `Ambient noise: ${ambient}.`,
     dialogue
-      ? `The character speaks one short line: "${dialogue}".`
+      ? `${speakerLabel(scene.speaker)} speaks one short line in Japanese: "${dialogue}". Nobody else speaks.`
       : `The scene is wordless and no one speaks; only ambient sound is heard.`,
   ];
   return lines.join(" ");
 }
 
 const cap = (t) => (t ? t[0].toUpperCase() + t.slice(1) : t);
+const speakerLabel = (sp) =>
+  ({ hero: "The young man (the protagonist)", senpai: "The woman in the navy blazer (the senior colleague)", boss: "The older man in the dark suit (the boss)" })[sp] ?? "The character";
 
 /**
  * 生成を依頼する秒数。Phase 3 からは台本の尺ではなく VEO_GEN_SEC（既定 8）を使い、

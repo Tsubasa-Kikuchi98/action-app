@@ -15,7 +15,7 @@
 // 既存ジョブは scripts/enrich.mjs で同じフィールドを後付けできる（旧 script.json 互換）。
 import { getOpenAI, MODELS, timed, writeScript, jobPaths, fmtUSD, isMain } from "./lib.mjs";
 import {
-  SCENE_TYPES, SPEAKERS, TELOP_TIMINGS, STYLES, DEFAULT_STYLE, DEFAULT_CUT_COUNT,
+  SCENE_TYPES, SPEAKERS, LEGACY_SPEAKER, CAST, TELOP_TIMINGS, STYLES, DEFAULT_STYLE, DEFAULT_CUT_COUNT,
   DEFAULT_CAMERA_BEAT, DURATION_RAMP, COPY_PRINCIPLES, PARODY_PRINCIPLES,
   guessSceneType, cutCap, maxDialogue, findForbidden,
 } from "./enrich.mjs";
@@ -106,7 +106,7 @@ const SCHEMA = {
         required: [
           "narration", "telop", "image_prompt", "video_prompt", "duration_sec",
           "scene_type", "cut_count", "visual_metaphor", "motion_beat", "camera_beat",
-          "ambient", "dialogue", "speaker", "telop_timing", "screen_text",
+          "ambient", "dialogue", "speaker", "telop_timing", "screen_text", "characters",
         ],
         properties: {
           narration: {
@@ -166,7 +166,12 @@ const SCHEMA = {
               "登場人物の日本語の決め台詞。6〜14字。無い場合は空文字。turn / montage / resolve のいずれかに置く。" +
               "役割は 1 拒絶（turn の頭）2 号砲（montage の頭）3 息継ぎ（montage 後半の軽口）。説明台詞は禁止。",
           },
-          speaker: { type: "string", enum: SPEAKERS, description: "dialogue の話者。dialogue が空なら none。" },
+          speaker: { type: "string", enum: SPEAKERS, description: "dialogue の話者。hero=主人公（若手男性）/ senpai=先輩（30代前半女性）/ boss=上司（50代男性）。dialogue が空なら none。" },
+          characters: {
+            type: "array",
+            description: "このシーンの画面に映る主要人物（hero / senpai / boss）。0〜3 個。無言の他社員は含めない。",
+            items: { type: "string", enum: ["hero", "senpai", "boss"] },
+          },
           telop_timing: {
             type: "string",
             enum: TELOP_TIMINGS,
@@ -244,11 +249,11 @@ ${COPY_PRINCIPLES}
 ${structureBlock(style)}
 
 # scene_type（冒頭は平和、次で発覚、最後は解決を見せずに切る）
-1. cold_open — **平和な日常**。明るく穏やかなシーン（金曜の夕方、退勤、連休前の浮ついたオフィス）。問題の「種」だけを観客に見せる（背後で回り続ける画面など）。ナレは「その日……」の静かな立ち上がり
-2. setup   — **発覚**。問題が最初に目に入る瞬間。「しかし……」。表情が固まり、周囲が振り返る
-3. turn    — 事態の深刻さが数字・言葉で突きつけられる。最も追い詰められた瞬間。短い言葉で畳みかける
-4. montage — 対応行動（召集・移動・突入・報告へ向かう）。「今、__が動き出す」
-5. resolve — **解決の直前で切る**。受話器を取る／Enter に指が触れる／扉を開ける寸前。**結果は絶対に見せない**（復旧・請求取消・夜明け・「静かになった」は禁止）。ナレは問いか宣言で終える
+1. cold_open — **平和な日常**。明るく穏やかなシーン（金曜の夕方、退勤、連休前の浮ついたオフィス）。**主人公**が失敗の「種」を残す（背後で回り続ける画面など）。観客だけが気づく。ナレは「その日……」の静かな立ち上がり
+2. setup   — **発覚**。**先輩**が最初に問題に気づく瞬間。「しかし……」。表情が固まり、周囲が振り返る
+3. turn    — 事態の深刻さが数字・言葉で突きつけられる。主人公と先輩が追い詰められる瞬間。セリフは主人公か先輩
+4. montage — 対応行動（上司の召集・移動・突入・報告へ向かう）。**上司**が登場し指示を出す。セリフは上司（号砲）
+5. resolve — **解決の直前で切る**。上司が受話器を取る／主人公の指が Enter に触れる／扉を開ける寸前。**結果は絶対に見せない**（復旧・請求取消・夜明け・「静かになった」は禁止）。ナレは問いか宣言で終える
 ※ シーン数（${SCENE_COUNT}）が 5 以外のときは、この流れをその数に圧縮／分割する。
 
 # ナレーション（narration）
@@ -268,7 +273,8 @@ ${structureBlock(style)}
 - cut_count は先頭から 1, 1, 2, 4, 3。montage だけ 6 まで許す。終盤ほどカットを細かく割る。
 
 # 視覚の演出（visual_metaphor → image_prompt / motion_beat）
-- 各シーンでまず visual_metaphor を「**現実の出来事（そのまま）＋ 演出の誇張**」の 1 行で書く（例: 「連休前の退勤 → 明るい夕方のオフィスを笑顔で出る社員、背後のモニターでログが流れ続ける」）。**上の演出文法に必ず沿わせる**。
+- **これはアクション映画の予告。各シーンに「アクション映画の要素カタログ」から 1 つ以上（montage は 2 つ以上）を必ず入れる**（爆発・火花／疾走・飛び乗り／蹴り開け／群衆／豪雨・雷／スロー／乗り物／巨大な数字）。静かなオフィスドラマになっていたら書き直す。
+- 各シーンでまず visual_metaphor を「**現実の出来事（そのまま）＋ アクション映画級の演出**」の 1 行で書く（例: 「連休前の退勤 → 夕日の逆光でエレベーターに乗る主人公、扉が閉まる瞬間に背後のサーバーラックが火花を散らし始める」）。**上の演出文法に必ず沿わせる**。
 - **出来事を別物に置き換えない**（城門・石板・砂漠・宇宙・怪獣・ミサイル・碑文は禁止）。観客が 1 秒で何が起きているか分かること。
 - **montage は対応行動**（召集・移動・突入・報告へ向かう）を 1〜1.5 秒で並べられる素材に。**resolve は解決の直前で止める**（受話器を取る・Enter に指・扉の前）。決着は映さない。
 - **窓ガラスが割れる瞬間の破片と武器は書かない**（Veo が弾く）。「割れた直後」で代替する。
@@ -366,7 +372,10 @@ export function normalize(data, episode, style = DEFAULT_STYLE) {
       camera_beat: String(s.camera_beat ?? "").trim() || DEFAULT_CAMERA_BEAT[type],
       ambient: String(s.ambient ?? "").trim(),
       dialogue: dialogueText,
-      speaker: dialogueText && SPEAKERS.includes(s.speaker) && s.speaker !== "none" ? s.speaker : dialogueText ? "male_mature" : "none",
+      speaker: dialogueText
+        ? (SPEAKERS.includes(s.speaker) && s.speaker !== "none" ? s.speaker : (LEGACY_SPEAKER[s.speaker] ?? "hero"))
+        : "none",
+      characters: (Array.isArray(s.characters) ? s.characters : []).filter((c) => CAST[c]).slice(0, 3),
       telop_timing: timing,
       screen_text: (Array.isArray(s.screen_text) ? s.screen_text : [])
         .map((t) => oneLine(t))
