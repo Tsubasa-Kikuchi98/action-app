@@ -38,13 +38,15 @@ async function trimSilence(file) {
 // 共通ブロック（全シーン同一）— 映画予告ナレーターの声そのものを定義する。
 export const NARRATION_COMMON = `Voice Affect: A Japanese TV movie-trailer announcer — bright, forward, and high-energy. Voice placed high and forward in the mask, not down in the chest. Big projection, as if calling across a packed theater.
 
-Tone: Excited, urgent, and larger-than-life. Every line is an announcement. Absolutely serious about the content — never mocking, never sleepy, never conversational.
+Tone: Excited, urgent, and larger-than-life. Every line is an announcement. Absolutely serious about the content — never mocking, never sleepy, never conversational, never monotone.
 
-Pacing: Fast and punchy. Attack each phrase hard and immediately. Pauses only where "……" appears, and keep them short and tense. Do not drag any syllable.
+Pacing: Very fast and punchy — noticeably faster than normal speech. Attack each phrase hard and immediately. Pauses only where "……" appears, and keep them short and tense. Never drag a syllable.
 
-Pronunciation: Crisp consonants, bright vowels, clear Japanese diction. Pitch rises into key words; sentence endings land hard and clean, never trailing off.
+Intonation: Strongly melodic and dynamic. Swing the pitch widely: leap UP on the key noun or number of each line, then drop sharply for the ending. Alternate loud and soft within a single sentence. No two consecutive phrases at the same pitch or volume. Think of a sports announcer calling a decisive play.
 
-Punctuation: "……" is a short, charged breath. A period is a sharp, complete stop.`;
+Pronunciation: Crisp consonants, bright vowels, clear Japanese diction. Sentence endings land hard and clean, never trailing off.
+
+Punctuation: "……" is a short, charged breath — the pitch drops into it and springs back out of it. A period is a sharp, complete stop.`;
 
 // scene_type 別ブロック。全体を高テンションに保ちつつ、序盤→終盤で熱量をさらに上げる。
 const NARRATION_BY_TYPE = {
@@ -154,7 +156,7 @@ async function tts(job, { file, text, voice, instructions, step, meta }) {
             input: text,
             instructions,
             // quality-research §5: speed は公式見解が矛盾。1.0 に戻し速度は Pacing: で制御する。
-            speed: Number(process.env.TTS_SPEED ?? 1.1),
+            speed: Number(process.env.TTS_SPEED ?? 1.25),
             response_format: "wav",
           }),
         { label: step }
@@ -180,7 +182,7 @@ export async function generateNarration(job, { force = false } = {}) {
   const data = raw; // 書き戻す先は元データ（拡張フィールドを壊さない）
   const voice = process.env.TTS_VOICE ?? "cedar";
   const round = roundingEnabled();
-  const speed = Number(process.env.TTS_SPEED ?? 1.1);
+  const speed = Number(process.env.TTS_SPEED ?? 1.25);
 
   const dlgCount = view.scenes.filter((s) => s.dialogue).length;
   console.log(
