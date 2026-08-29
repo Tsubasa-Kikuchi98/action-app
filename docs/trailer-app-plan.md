@@ -51,6 +51,28 @@ run.mjs: ① → ①'(不足時) → ⓪(不足分のみ) → ② → ③ → �
 ```
 設計原則: 工程ごとに独立スクリプト、中間生成物は `out/<job>/` に残す。台本 JSON が唯一の真実で、演出判断はすべてそこに書かれ render は解釈するだけ。
 
+### コード構成（クリーンアーキテクチャ・2026-08-30 リファクタ）
+
+上の ①〜⑤ は同じまま、実装だけを**依存が内向きだけになる 4 層**に組み替えた（挙動・CLI・出力は変更なし）。
+
+```
+src/domain/    外部依存ゼロ。台本の型・normalize・enrichedView（旧台本互換）・lint、固定キャスト／ロケ、
+               各工程のプロンプト（文字列データ）、タイムライン設計（カット割り・カード配置・
+               xfade オフセット・ASS・filter_complex の文字列生成）、単価表
+src/usecases/  工程のオーケストレーション。ポート（引数の deps）にだけ依存
+src/adapters/  ポートの実装: openai(text/image/tts) / gemini(veo) / ffmpeg(exec,filters,ass) /
+               storage(jobStore, files, refsStore, env)
+src/cli/       引数解析と createDeps()（composition root）
+scripts/*.mjs  src/cli/*.mjs を呼ぶだけの互換エントリ（コマンドの使い方は従来どおり）
+test/          domain の純関数のユニットテスト（node --test / API を呼ばない）
+```
+
+狙いは「**演出の判断を全部 domain の純関数に閉じ込め、$0 でテストできるようにする**」こと。
+カット割り・xfade オフセット・ASS・filter_complex は ffmpeg を起動せずに文字列として検証でき、
+Veo や画像を再生成せずに演出のイテレーションが回せる。
+リファクタの妥当性は、demo1 / demo3 / lambda の `fc.txt`・`telop.ass`・`cuts/fc_c*.txt` が
+リファクタ前と**バイト単位で一致**することで確認した。
+
 ### 1本あたりの見積（Phase 2）
 | 項目 | 費用 | 時間 |
 |---|---|---|

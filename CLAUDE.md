@@ -17,7 +17,7 @@
 
 | 工程 | 手段 | 備考 |
 |---|---|---|
-| 台本生成 | OpenAI `gpt-5.6-luna` + Structured Outputs（json_schema, strict） | 出力: `{ title, tagline, presents, review_line, stake, button_line, style, release_line, cast_lines, interstitials, scenes[]{ narration, telop, dialogue, visual_metaphor, image_prompt, video_prompt, scene_type, cut_count, telop_timing, ... } }`。パロディの原理・視覚の翻訳文法は `PARODY_PRINCIPLES`（enrich.mjs）に集約 |
+| 台本生成 | OpenAI `gpt-5.6-luna` + Structured Outputs（json_schema, strict） | 出力: `{ title, tagline, presents, review_line, stake, button_line, style, release_line, cast_lines, interstitials, scenes[]{ narration, telop, dialogue, visual_metaphor, image_prompt, video_prompt, scene_type, cut_count, telop_timing, ... } }`。パロディの原理・視覚の翻訳文法は `PARODY_PRINCIPLES`（`src/domain/prompts/principles.mjs`）に集約 |
 | 画像生成 | OpenAI `gpt-image-2` / `1536x1024` / 開発中は `quality: "low"`、本番は `medium` | 写真ありは `images/edits` に参照画像を毎回添付。`Promise.all` で並列。Tier1 は 5枚/分。Phase 2 以降は動画の起点画像＋フォールバック |
 | 基準画像（Phase 3 D） | `scripts/refs.mjs` が `assets/refs/` に **キャラシート `char_<hero\|senpai\|boss>.png`（同一人物 3 ビュー）＋ ロケプレート `loc_<key>.png`（人物なし）** を medium で生成（ジョブ横断で再利用・git 管理外） | シーン画像は **`images/edits`** で `image[]` に「characters のキャラシート最大 3 枚＋location のプレート 1 枚」を添付して生成し、並列 5 枚でも顔・服・部屋を揃える。`input_fidelity` は gpt-image-2 では送らない（常に高忠実度で固定）。参照 0 枚のシーンは `images/generations` にフォールバック |
 | 動画生成（Phase 2） | Google Gemini API **Veo 3.1 Lite** `veo-3.1-lite-generate-preview` / 720p / image-to-video / 4・6・8 秒 | $0.05/秒、無料枠なし。音声は常に同梱（環境音として採用、`no dialogue, no speech` をプロンプトに固定）。生成 11秒〜最大6分・非同期ポーリング。生成物はサーバ保持2日 → 即DL。失敗時はそのシーンだけ静止画 Ken Burns にフォールバック。品質向上時は `veo-3.1-fast-generate-preview` にモデル名差し替え |
@@ -26,28 +26,99 @@
 | BGM | ElevenLabs Music API（`force_instrumental: true`）。未契約時はフリー素材を `assets/bgm/` に置いて使う | Music API は有料契約者限定 |
 | 効果音 | Phase 2 では作らない（Veo 同梱音声で代替）。Phase 3 で ElevenLabs SFX（編集点の whoosh/impact/braam）を再検討 | — |
 | 合成 | ffmpeg 9.0.1（winget 導入済み） | シーン別レンダ → 最終 xfade 合成。動画クリップは 1080p に拡大、Veo 音声は環境音レーンとしてダッキング |
-| 実装言語 | Node 22（ESM, `.mjs`）。ffmpeg の filter_complex 生成も Node で行う | 追加パッケージは最小限（`openai` のみ想定） |
+| 実装言語 | Node 22（ESM, `.mjs`）。ffmpeg の filter_complex 生成も Node で行う | 追加パッケージは最小限（`openai` / `@google/genai` / `dotenv`）。構成はクリーンアーキテクチャ（`src/domain` ← `src/usecases` ← `src/adapters` ← `src/cli`） |
 
 Anthropic API は使わない（Claude Code サブスクに API は含まれない）。
 
-## ディレクトリ構成（予定）
+## ディレクトリ構成（クリーンアーキテクチャ）
+
+依存は**内向きのみ**: `domain ← usecases ← adapters ← cli`。
+`scripts/*.mjs` は `src/cli/*.mjs` を呼ぶだけの**互換エントリ**（各 2 行）で、コマンドの使い方・
+環境変数名・出力ファイル名・`log.jsonl` の形式は従来どおり変わらない。
 
 ```
-scripts/           各工程のスクリプト（gen-image.mjs は既存）
-  script.mjs       ① 台本生成 → out/<job>/script.json
-  enrich.mjs       ①' 演出情報の付与（既存フィールドは変更しない）→ script.json
-  refs.mjs         ⓪ 基準画像 → assets/refs/char_*.png・loc_*.png（ジョブ横断で再利用）
-  images.mjs       ② 画像生成（images/edits に基準画像を添付）→ out/<job>/img/sN.png
-  narration.mjs    ③ TTS      → out/<job>/nar/sN.wav・out/<job>/dlg/sN.wav（セリフ）
-  video.mjs        ③' Veo     → out/<job>/vid/sN.mp4（Phase 2）
-  bgm.mjs          ④ BGM      → out/<job>/bgm.mp3
-  render.mjs       ⑤ ffmpeg   → out/<job>/cuts/cNNN.mp4 ＋ telop.ass → out/<job>/trailer.mp4
-  run.mjs          ①〜⑤ を順に実行（--stills で動画生成をスキップ）
+src/
+  domain/                      外部依存ゼロ（node 組み込み / SDK / dotenv を import しない）
+    cast.mjs                   固定キャスト 3 人・固定ロケーション 5 箇所・外見の英語記述
+    pricing.mjs                単価表（PRICES）と estimateCost / fmtUSD
+    script/
+      types.mjs                Script / Scene とポートの JSDoc typedef（型専用）
+      constants.mjs            SCENE_TYPES / STYLES / 既定ランプ / cut 上限 / 禁句 / scene_type 推定
+      normalize.mjs            モデル出力の正規化（排他ルール・4/6/8 丸め・上限クランプ）
+      enrichedView.mjs         旧 script.json 互換ビュー（非破壊）と isEnriched
+      lint.mjs                 lintScript（禁句・字数・stake の数字・重複を warn）
+      rounding.mjs             シーン尺の 4/6/8 丸め（roundSceneSec）
+      index.mjs                上記のまとめ再エクスポート
+    prompts/
+      principles.mjs           PARODY_PRINCIPLES / COPY_PRINCIPLES（台本・enrich 共通）
+      scriptPrompt.mjs         ① 台本の JSON スキーマ・システムプロンプト・strict 検証
+      enrichPrompt.mjs         ①' 演出付与の JSON スキーマ・システムプロンプト
+      imagePrompt.mjs          ② 画像プロンプト（edits / generations）
+      refsPrompt.mjs           ⓪ 基準画像プロンプト（キャラシート / ロケプレート）
+      videoPrompt.mjs          ③ Veo の motion-first プロンプトと生成秒数の決定
+      ttsInstructions.mjs      ③' TTS の演技指示と話者→声の対応
+    timeline/
+      constants.mjs            解像度 / fps / カード尺 / 音量 / ズーム / カット上限（env で調整）
+      plan.mjs                 ⑤ の頭脳: カット割り・カード配置・音イベント・ASS イベント・xfade
+      ass.mjs                  ASS の文字列生成（スタイル定義とイベント整形）
+      filters.mjs              filter_complex の文字列生成（カット / 最終合成 / ルック / 音チェーン）
+  usecases/                    工程のオーケストレーション。ポート（引数の deps）にだけ依存
+    generateScript.mjs         ① 台本生成
+    enrichScript.mjs           ①' 演出付与（既存フィールドは変更しない）
+    prepareRefs.mjs            ⓪ 基準画像
+    generateImages.mjs         ② シーン画像
+    generateNarration.mjs      ③' ナレ・セリフ・button
+    generateVideos.mjs         ③ Veo（--stills / --dry-run / 予算ガード）
+    prepareBgm.mjs             ④ BGM（assets → ElevenLabs → 合成音）
+    renderTrailer.mjs          ⑤ 実測 → planTimeline → ASS → カット別レンダ → 最終合成
+    runPipeline.mjs            ①〜⑤ の一気通貫とサマリ表示
+    pool.mjs                   同時実行数を絞るワーカープール
+  adapters/                    ポートの実装（外部サービスと FS）
+    retry.mjs                  429 / 5xx の指数バックオフ
+    openai/  client.mjs        API キー確認とクライアント生成
+             text.mjs          Responses API + Structured Outputs
+             image.mjs         images/generations と images/edits
+             tts.mjs           gpt-4o-mini-tts
+    gemini/  veo.mjs           generateVideos + ポーリング + 即ダウンロード
+    ffmpeg/  exec.mjs          resolveBin / run / ffmpeg / probe*（PATH → winget）
+             filters.mjs       fc.txt の書き出しと ffmpeg 実行（カット / 最終合成）
+             ass.mjs           telop.ass の書き出し
+    storage/ env.mjs           dotenv・ROOT・rel()・MODELS
+             jobStore.mjs      out/<job>/ のパス・script.json・log.jsonl・timed()
+             files.mjs         FileStore（exists / read / write / remove …）
+             refsStore.mjs     assets/refs/ の探索と台本からの必要リスト算出
+  cli/                         引数解析と usecases 呼び出しだけ
+    args.mjs                   共通 parseArgs（--force / --dry-run / --stills / --style= …）
+    deps.mjs                   createDeps()（composition root。adapters をポートに束ねる）
+    script|enrich|refs|images|narration|video|bgm|render|run.mjs
+scripts/                       互換エントリ（各 2 行。src/cli/*.mjs を呼ぶだけ）
+  gen-image.mjs                単発の画像生成ツール（パイプライン外・従来どおり）
+test/                          domain の純関数のユニットテスト（node --test / $0）
+```
+
+### 層のルール（必ず守る）
+- **domain** は `node:fs` / `node:child_process` / SDK / `dotenv` を **import しない**（純関数と文字列データだけ）。
+  `process.env` からのつまみ読みは可（既定値の上書き）。
+- **usecases** は adapters を import しない。ファイル・API・ffmpeg には**引数で渡されたポート**（`store` /
+  `files` / `media` / `text` / `image` / `speech` / `video` / `refs`）経由でだけ触る。`node:path` はパス文字列の
+  計算だけなので可。
+- **adapters** は domain だけを import してよい（usecases / cli は不可）。
+- ポートの実装を束ねるのは `src/cli/deps.mjs` の `createDeps()` ただ 1 箇所。
+- この 4 つは `test/architecture.test.mjs` が機械的に検査するので、`npm test` を通せば違反に気づける。
+
+### 出力・中間生成物（従来どおり）
+```
 assets/bgm/        フォールバック用フリーBGM
 assets/refs/       基準画像（キャラシート / ロケプレート。git 管理外）
-out/               生成物（git 管理外）
+out/<job>/         script.json / img / vid / nar / dlg / cuts / telop.ass / fc.txt / trailer.mp4 / log.jsonl
 docs/              企画・調査資料
 ```
+
+## テスト
+
+`npm test`（= `node --test "test/**/*.test.mjs"`）。**API は呼ばないので $0**。
+domain の純関数（normalize の排他ルール・尺の丸め・カット割り・xfade オフセット・lint の禁句検出・
+buildVideoPrompt）と、層の依存の向きを検査する。演出を触ったら必ず通すこと。
 
 ## 環境変数（.env、git 管理外）
 

@@ -8,7 +8,7 @@
 - [AI技術スタックとセットアップ手順](docs/AI_STACK_SETUP.md)
 - [アプリ案の厳選結果](docs/shortlist.md)
 - [予告生成アプリ 企画メモ（実現性・活用シーン）](docs/trailer-app-plan.md)
-- [CLAUDE.md](CLAUDE.md) — 開発方針と Phase 1 ToDo
+- [CLAUDE.md](CLAUDE.md) — 開発方針・ディレクトリ構成・ffmpeg の注意・Phase ごとの ToDo
 
 ## 技術スタック（AI）
 
@@ -28,6 +28,36 @@
 3. 任意で `assets/bgm/` にフリー BGM を1曲置く（無ければ ffmpeg の合成音でプレースホルダを作ります）。
 4. 予告編を生成: `npm run trailer -- "締切前夜に全員で徹夜してリリースを間に合わせた話" demo1`
 5. 結果は `out/demo1/trailer.mp4`（1920x1080 / 30fps）。中間生成物は `out/demo1/` に残るので工程単位でやり直せます（`node scripts/images.mjs demo1 --force` 等）。
+
+## コード構成（クリーンアーキテクチャ）
+
+依存は**内向きのみ**（`domain ← usecases ← adapters ← cli`）。
+`scripts/*.mjs` は `src/cli/*.mjs` を呼ぶだけの**互換エントリ**なので、コマンドの使い方は従来どおりです。
+
+```
+src/
+  domain/     外部依存ゼロ。台本の型・正規化・lint、固定キャスト、各種プロンプト（文字列）、
+              タイムライン設計（カット割り・xfade オフセット・ASS・filter_complex の生成）、単価表
+  usecases/   工程のオーケストレーション（台本 / 演出 / 基準画像 / 画像 / ナレ / 動画 / BGM / 合成 / 一気通貫）。
+              ポート（引数で渡す依存）にだけ依存する
+  adapters/   ポートの実装。openai（text / image / tts）、gemini（veo）、
+              ffmpeg（exec / filters / ass）、storage（jobStore / files / refsStore / env）
+  cli/        引数解析（args.mjs）と依存の組み立て（deps.mjs の createDeps()）だけ
+scripts/      互換エントリ（各 2 行）。gen-image.mjs だけはパイプライン外の単発ツール
+test/         domain の純関数のユニットテスト
+```
+
+各層の詳しいファイル一覧とルールは [CLAUDE.md](CLAUDE.md#ディレクトリ構成クリーンアーキテクチャ) を参照。
+
+## テスト
+
+```bash
+npm test    # node --test "test/**/*.test.mjs" — API を呼ばないので $0
+```
+
+domain の純関数（normalize の排他ルール、シーン尺の 4/6/8 丸め、カット割り、
+xfade オフセット = Σクリップ − Σトランジション、lint の禁句検出、Veo プロンプトの組み立て）と、
+層の依存の向きを検査します。
 
 ## パイプライン
 
