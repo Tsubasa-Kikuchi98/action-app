@@ -50,10 +50,9 @@ export const PRICES = {
     in: Number(process.env.PRICE_SCRIPT_IN ?? 1.25),
     out: Number(process.env.PRICE_SCRIPT_OUT ?? 10),
   },
-  // TTS: 入力テキスト / 出力音声 100万トークンあたり
+  // TTS: 課金はトークンだが公式の目安は「音声 1 分あたり」なので実尺で見積もる。
   "gpt-4o-mini-tts": {
-    in: Number(process.env.PRICE_TTS_IN ?? 0.6),
-    out: Number(process.env.PRICE_TTS_OUT ?? 12),
+    perAudioMin: Number(process.env.PRICE_TTS_PER_MIN ?? 0.015),
   },
   // 画像: 1枚あたり（1536x1024 / low の概算）
   "gpt-image-2": { perImage: Number(process.env.PRICE_IMAGE_LOW ?? 0.016) },
@@ -67,6 +66,7 @@ export function estimateCost(model, usage = {}) {
   if (!p) return 0;
   if (p.perImage != null) return p.perImage * (usage.images ?? 1);
   if (p.perSec != null) return p.perSec * (usage.video_sec ?? 0);
+  if (p.perAudioMin != null) return (p.perAudioMin * (usage.audio_sec ?? 0)) / 60;
   const inTok = usage.input_tokens ?? usage.prompt_tokens ?? 0;
   const outTok = usage.output_tokens ?? usage.completion_tokens ?? 0;
   return (inTok / 1e6) * p.in + (outTok / 1e6) * p.out;
@@ -87,8 +87,11 @@ export function jobPaths(job) {
     img: path.join(d, "img"),
     vid: path.join(d, "vid"),
     nar: path.join(d, "nar"),
+    dlg: path.join(d, "dlg"),
     telop: path.join(d, "telop"),
     scenes: path.join(d, "scenes"),
+    cuts: path.join(d, "cuts"),
+    ass: path.join(d, "telop.ass"),
     fc: path.join(d, "fc.txt"),
     trailer: path.join(d, "trailer.mp4"),
   };
@@ -231,6 +234,28 @@ export async function probeDuration(file) {
   const v = parseFloat(r.stdout.trim());
   if (!Number.isFinite(v)) throw new Error(`尺を取得できません: ${file}\n${r.stderr}`);
   return v;
+}
+
+/**
+ * volumedetect で mean/max ボリューム（dBFS）を測る。
+ * 音声ストリームが無い場合は null を返す。区間を測るときは ss / to（秒）を渡す。
+ */
+export async function probeVolume(file, { ss = null, to = null } = {}) {
+  const pre = [];
+  if (ss != null) pre.push("-ss", String(ss));
+  if (to != null) pre.push("-to", String(to));
+  const r = await run(ffmpegPath(), [
+    "-hide_banner", "-nostdin",
+    ...pre,
+    "-i", file,
+    "-map", "0:a:0?",
+    "-af", "volumedetect",
+    "-f", "null", "-",
+  ]);
+  const mean = /mean_volume:\s*(-?[\d.]+) dB/.exec(r.stderr);
+  const max = /max_volume:\s*(-?[\d.]+) dB/.exec(r.stderr);
+  if (!mean) return null;
+  return { mean: parseFloat(mean[1]), max: max ? parseFloat(max[1]) : null };
 }
 
 /** 動画の要約（解像度 / fps / コーデック / 尺）。 */

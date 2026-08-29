@@ -1,5 +1,5 @@
 // ③ 動画生成（Phase 2）: img/sN.png を起点に image-to-video → out/<job>/vid/sN.mp4
-// 使い方: node scripts/video.mjs <job> [--force] [--stills]
+// 使い方: node scripts/video.mjs <job> [--force] [--stills] [--dry-run]
 //
 // Google Gemini API の Veo 3.1 Lite（既定 veo-3.1-lite-generate-preview）を使う。
 //   - 720p / 16:9 / durationSeconds は 4 / 6 / 8 のいずれか（scene.duration_sec をそのまま渡す）
@@ -20,18 +20,42 @@ import {
   getGemini, MODELS, ensureDirs, readScript, writeScript, jobPaths,
   timed, withRetry, probeDuration, sleep, fmtUSD, isMain, PRICES, ffmpeg,
 } from "./lib.mjs";
+import { enrichedView, DEFAULT_CAMERA_BEAT } from "./enrich.mjs";
 
-// 全カットの見た目を揃えるためのスタイル接尾辞（images.mjs の STYLE_SUFFIX と対になる）。
-export const VIDEO_STYLE_SUFFIX =
-  "cinematic movie trailer shot, anamorphic lens, teal and orange grade, film grain, dramatic lighting, " +
-  "single continuous take";
+// Phase 3 / quality-research §B: **motion-first テンプレート**。
+// 起点画像に写っているもの（外見・色調・レンズ）は再記述しない。
+// 「被写体 / カメラ / 環境」を各 1 つ、動きは 1〜2 種に絞ると Veo がよく動く。
+//
+//   <camera_beat>. <motion_beat>. Secondary motion: <env_beat>.
+//   The scene keeps the exact lighting, color and framing of the source image.
+//   Ambient noise: <ambient>.
+//   （dialogue があるシーンだけ）The character says: "<セリフ>".
+//   （dialogue が無いシーン）The scene is wordless and no one speaks; only ambient sound is heard.
+//
+// 引用符は**セリフにだけ**使う（Veo は引用符の中身を発話として解釈する。公式ガイド）。
 
-// negativePrompt が使えないモデル向けに、否定語をプロンプト本文へ固定付与する。
-export const VIDEO_NEGATIVE_SUFFIX =
-  "no dialogue, no speech, no on-screen text";
+/** scene_type 別のカメラ既定値（camera_beat が空のときのフォールバック）。 */
+export const CAMERA_FALLBACK = DEFAULT_CAMERA_BEAT;
 
-// config.negativePrompt に送る文字列（VEO_NEGATIVE_PROMPT=on のときだけ使用）。
-export const VEO_NEGATIVE_PROMPT = "dialogue, speech, talking, subtitles, text, captions, logo";
+/** scene_type 別の二次的な動き（背景・環境側の動き）。 */
+export const ENV_BEAT = {
+  cold_open: "dust drifting through the light, faint flicker on distant screens",
+  setup: "papers stirring, reflections sliding across glass",
+  turn: "warning light pulsing, shadows sweeping past",
+  montage: "sparks and steam crossing frame, silhouettes moving in the background",
+  resolve: "slow-moving haze, first light spreading across the room",
+};
+
+/** 環境音が台本に無いときのフォールバック。 */
+const AMBIENT_FALLBACK = "low room tone and distant machinery";
+
+// config.negativePrompt に送る文字列（VEO_NEGATIVE_PROMPT=on のときだけ使用。Lite は 400）。
+export const VEO_NEGATIVE_PROMPT = "subtitles, on-screen text, captions, logo, watermark";
+
+// Phase 3 / quality-research 打ち手 #7: **8 秒生成して使うのは 4〜6 秒**。
+// クリップ後半ほど破綻しやすいので、render 側が必要な秒数だけ前半から切り出す。
+// 尺は台本ではなく VEO_GEN_SEC で決める（既定 8）。
+export const VEO_GEN_SEC = Number(process.env.VEO_GEN_SEC ?? 8);
 
 const POLL_MS = 10_000;
 
@@ -52,19 +76,52 @@ async function prepareSource(img, dst) {
   return dst;
 }
 
-/** scene から Veo に渡す最終プロンプトを組み立てる。 */
+/**
+ * scene から Veo に渡す最終プロンプトを組み立てる（motion-first）。
+ * enrich 済みなら camera_beat / motion_beat / ambient / dialogue を使い、
+ * 旧 script.json（Phase 1/2）では video_prompt / image_prompt にフォールバックする。
+ */
 export function buildVideoPrompt(scene) {
-  // video_prompt が無い旧 script.json（Phase 1）でも image_prompt から動かせるようにする。
-  const base =
+  const type = scene.scene_type ?? "setup";
+  const camera = (scene.camera_beat ?? "").trim() || CAMERA_FALLBACK[type] || CAMERA_FALLBACK.setup;
+  const motion = (scene.motion_beat ?? "").trim();
+  const env = ENV_BEAT[type] ?? ENV_BEAT.setup;
+  const ambient = (scene.ambient ?? "").trim() || AMBIENT_FALLBACK;
+  const dialogue = (scene.dialogue ?? "").trim();
+
+  // motion_beat が無い旧台本は video_prompt / image_prompt から動きを拾う
+  const action =
+    motion ||
     scene.video_prompt?.trim() ||
-    `${scene.image_prompt?.trim() ?? ""} Slow cinematic push-in with subtle camera drift.`;
-  return `${base} ${VIDEO_STYLE_SUFFIX}, ${VIDEO_NEGATIVE_SUFFIX}`;
+    `${scene.image_prompt?.trim() ?? ""} The subject moves decisively within the frame.`;
+
+  const lines = [
+    `${cap(camera)}.`,
+    `${cap(action)}${/[.!?]$/.test(action) ? "" : "."}`,
+    `Secondary motion: ${env}.`,
+    `The scene keeps the exact lighting, color and framing of the source image.`,
+    `Ambient noise: ${ambient}.`,
+    dialogue
+      ? `The character speaks one short line: "${dialogue}".`
+      : `The scene is wordless and no one speaks; only ambient sound is heard.`,
+  ];
+  return lines.join(" ");
 }
 
-/** Veo が受け付ける尺（4/6/8）に丸める。 */
+const cap = (t) => (t ? t[0].toUpperCase() + t.slice(1) : t);
+
+/**
+ * 生成を依頼する秒数。Phase 3 からは台本の尺ではなく VEO_GEN_SEC（既定 8）を使い、
+ * 使うのは前半 4〜6 秒だけにする（後半の破綻を捨てる）。
+ * VEO_MAX_SEC でクランプ、VEO_GEN_SEC=fit にすると従来どおり台本の尺に合わせる。
+ */
 function veoDuration(sec) {
   const max = Number(process.env.VEO_MAX_SEC ?? 8);
-  return [4, 6, 8].filter((v) => v <= max).find((v) => v >= sec - 1e-6) ?? Math.min(8, max);
+  const steps = [4, 6, 8].filter((v) => v <= max);
+  if ((process.env.VEO_GEN_SEC ?? "").toLowerCase() === "fit") {
+    return steps.find((v) => v >= sec - 1e-6) ?? steps[steps.length - 1];
+  }
+  return steps.find((v) => v >= VEO_GEN_SEC - 1e-6) ?? steps[steps.length - 1];
 }
 
 /** 一定同時数で非同期タスクを走らせるワーカープール。 */
@@ -195,9 +252,27 @@ async function generateOne(job, scene, i, { timeoutSec }) {
   }
 }
 
-export async function generateVideos(job, { force = false, stills = false } = {}) {
+export async function generateVideos(job, { force = false, stills = false, dryRun = false } = {}) {
   const p = ensureDirs(job, "vid");
   const data = readScript(job);
+  // camera_beat / ambient 等の既定値を埋めたビュー（プロンプト組み立てにだけ使う）
+  const view = enrichedView(data);
+
+  // --- ドライラン: API を呼ばずにプロンプトと想定費用だけ出す --------------
+  if (dryRun) {
+    let sec = 0;
+    for (const [i, s] of view.scenes.entries()) {
+      const d = veoDuration(s.duration_sec ?? 4);
+      sec += d;
+      console.log(`
+--- s${i + 1} [${s.scene_type}] ${d}s 生成 ---`);
+      console.log(buildVideoPrompt(s));
+    }
+    const cost = (PRICES[MODELS.video]?.perSec ?? 0) * sec;
+    console.log(`
+[video --dry-run] ${MODELS.video} / ${view.scenes.length}本 / 計 ${sec}s ≒ ${fmtUSD(cost)}（API は呼んでいません）`);
+    return { results: [], cost: 0, veoSec: 0, videoCount: 0, stillCount: 0, dryRun: true, planSec: sec, planCost: cost };
+  }
 
   // --- 全シーン静止画モード ---------------------------------------------
   if (stills) {
@@ -242,7 +317,7 @@ export async function generateVideos(job, { force = false, stills = false } = {}
   }
 
   const t0 = Date.now();
-  const results = await pool(todo, concurrency, ({ scene, i }) => generateOne(job, scene, i, { timeoutSec }));
+  const results = await pool(todo, concurrency, ({ i }) => generateOne(job, view.scenes[i], i, { timeoutSec }));
 
   // --- script.json に結果を書き戻す（単一の writer） -----------------------
   for (const r of results) {
@@ -279,6 +354,7 @@ if (isMain(import.meta.url)) {
   const args = process.argv.slice(2);
   const force = args.includes("--force");
   const stills = args.includes("--stills");
+  const dryRun = args.includes("--dry-run");
   const job = args.find((a) => !a.startsWith("--")) ?? "demo1";
-  await generateVideos(job, { force, stills });
+  await generateVideos(job, { force, stills, dryRun });
 }

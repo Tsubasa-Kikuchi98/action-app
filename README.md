@@ -18,6 +18,7 @@
 | イラスト生成 | OpenAI 画像生成 API（gpt-image-2）— `scripts/gen-image.mjs` |
 | 動画生成 | Google Gemini API — Veo 3.1 Lite（image-to-video、720p）— `scripts/video.mjs` |
 | BGM・効果音 | ElevenLabs（公式 MCP） |
+| ナレーション・セリフ | OpenAI TTS（gpt-4o-mini-tts）— `scripts/narration.mjs` |
 
 ## セットアップ
 
@@ -31,11 +32,19 @@
 ## パイプライン
 
 ```
-① 台本(script.mjs) → ｛② 画像(images.mjs) ‖ ③' ナレ(narration.mjs) ‖ ④ BGM(bgm.mjs)｝
-                   → ③ 動画(video.mjs, Veo) → ⑤ 合成(render.mjs)
+① 台本(script.mjs) → ①' 演出(enrich.mjs, 不足時のみ)
+   → ｛② 画像(images.mjs) ‖ ③' ナレ+セリフ(narration.mjs) ‖ ④ BGM(bgm.mjs)｝
+   → ③ 動画(video.mjs, Veo) → ⑤ 合成(render.mjs)
 ```
 
 `③ 動画` は起点画像（②）と 4/6/8 秒に丸めたシーン尺（③'）の両方に依存するため、並列グループの後に走ります。
+
+`①' 演出`（`node scripts/enrich.mjs <job>`）は既存の台本を**壊さずに**演出情報だけ足す工程です
+（シーンタイプ / カット数 / 決め台詞 / 中間カード / タグライン / エンドカード）。
+Phase 1・2 で作った古い `script.json` を作り直さずに Phase 3 の演出を載せるために使います
+（`script.mjs` は最初から同じフィールドを出すので、新規生成では走りません）。
+`③' ナレ` はナレーションに加えて `dialogue` のある**シーンの決め台詞をナレとは別の声**で生成し、`out/<job>/dlg/sN.wav` に置きます。
+`⑤ 合成`では Veo 同梱の環境音が主役級の音量で鳴ります（`AMBIENT_VOL` 既定 0.9・ナレ中だけダッキング。`AMBIENT_TARGET_DB` でクリップ間の音量を揃える）。
 
 ## Phase 2（全シーン動画化）
 
@@ -70,6 +79,25 @@ node scripts/video.mjs demo3
 Veo には無料枠がありません。事故防止のため 1 ジョブの生成秒数に上限があり（`VEO_BUDGET_SEC`、既定 48 秒）、
 超える見込みのときは API を呼ぶ前に停止します。`--stills` を付ければ Veo は一切呼ばれません。
 
-主な環境変数は `.env.example` を参照（`VEO_MODEL` / `VEO_CONCURRENCY` / `VEO_TIMEOUT_SEC` / `VEO_BUDGET_SEC` / `SCENE_ROUND`）。
+主な環境変数は `.env.example` を参照（`VEO_MODEL` / `VEO_CONCURRENCY` / `VEO_TIMEOUT_SEC` / `VEO_BUDGET_SEC` / `SCENE_ROUND` / `VEO_GEN_SEC`）。
+`node scripts/video.mjs <job> --dry-run` で **API を呼ばずに** Veo へ送るプロンプトと想定費用だけ確認できます。
+
+## Phase 3（編集・演出の作り込み）
+
+既存クリップを再利用したまま、カットランプ（終盤ほど短いカット）・疑似寄り・手ブレ・スロー・白フラッシュ・
+中間カード・stopdown（タイトル直前の無音の黒）・ASS テロップ・2.39:1 レターボックスを `render.mjs` が組み立てます。
+
+```bash
+# 既存の台本に演出情報だけ足す（$0.02 / 既存フィールドは変更しない）
+node scripts/enrich.mjs demo3
+
+# ナレ + セリフを作り直す（$0.01 弱）
+node scripts/narration.mjs demo3 --force
+
+# 編集だけ作り直す（$0・Veo も画像も呼ばない）
+node scripts/render.mjs demo3 --force
+```
+
+演出の調整は `.env` の `AMBIENT_VOL` / `DLG_VOL` / `BGM_VOL` / `XFADE_SEC` / `LETTERBOX` / 各カードの尺で行えます。
 
 詳細は [docs/AI_STACK_SETUP.md](docs/AI_STACK_SETUP.md) と [CLAUDE.md](CLAUDE.md) を参照。

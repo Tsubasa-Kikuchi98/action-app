@@ -18,7 +18,8 @@
 | 台本生成 | OpenAI `gpt-5.6-luna` + Structured Outputs（json_schema, strict） | 出力: `{ title, scenes[]{ narration, telop, image_prompt, duration_sec } }` |
 | 画像生成 | OpenAI `gpt-image-2` / `1536x1024` / 開発中は `quality: "low"`、本番は `medium` | 写真ありは `images/edits` に参照画像を毎回添付。`Promise.all` で並列。Tier1 は 5枚/分。Phase 2 以降は動画の起点画像＋フォールバック |
 | 動画生成（Phase 2） | Google Gemini API **Veo 3.1 Lite** `veo-3.1-lite-generate-preview` / 720p / image-to-video / 4・6・8 秒 | $0.05/秒、無料枠なし。音声は常に同梱（環境音として採用、`no dialogue, no speech` をプロンプトに固定）。生成 11秒〜最大6分・非同期ポーリング。生成物はサーバ保持2日 → 即DL。失敗時はそのシーンだけ静止画 Ken Burns にフォールバック。品質向上時は `veo-3.1-fast-generate-preview` にモデル名差し替え |
-| ナレーション | OpenAI `gpt-4o-mini-tts` / voice `cedar` / `response_format: "wav"` | `instructions` で映画予告風の演技を指示 |
+| ナレーション | OpenAI `gpt-4o-mini-tts` / voice `cedar` / `response_format: "wav"` / `speed` 1.0 | `instructions` は openai.fm 公式のラベル形式。共通ブロック ＋ scene_type 別ブロック。生成後に前後の無音を自動トリム |
+| セリフ（Phase 3） | 同 TTS。ナレとは別 voice（`ash` / `onyx` / `nova` / `shimmer`）で `out/<job>/dlg/sN.wav` | 台本の `dialogue`（予告全体で 2〜3 本）。render で小部屋の残響を付けて「現場の声」にする |
 | BGM | ElevenLabs Music API（`force_instrumental: true`）。未契約時はフリー素材を `assets/bgm/` に置いて使う | Music API は有料契約者限定 |
 | 効果音 | Phase 2 では作らない（Veo 同梱音声で代替）。Phase 3 で ElevenLabs SFX（編集点の whoosh/impact/braam）を再検討 | — |
 | 合成 | ffmpeg 9.0.1（winget 導入済み） | シーン別レンダ → 最終 xfade 合成。動画クリップは 1080p に拡大、Veo 音声は環境音レーンとしてダッキング |
@@ -31,11 +32,12 @@ Anthropic API は使わない（Claude Code サブスクに API は含まれな�
 ```
 scripts/           各工程のスクリプト（gen-image.mjs は既存）
   script.mjs       ① 台本生成 → out/<job>/script.json
+  enrich.mjs       ①' 演出情報の付与（既存フィールドは変更しない）→ script.json
   images.mjs       ② 画像生成 → out/<job>/img/sN.png
-  narration.mjs    ③ TTS      → out/<job>/nar/sN.wav
+  narration.mjs    ③ TTS      → out/<job>/nar/sN.wav・out/<job>/dlg/sN.wav（セリフ）
   video.mjs        ③' Veo     → out/<job>/vid/sN.mp4（Phase 2）
   bgm.mjs          ④ BGM      → out/<job>/bgm.mp3
-  render.mjs       ⑤ ffmpeg   → out/<job>/scenes/sN.mp4 → out/<job>/trailer.mp4
+  render.mjs       ⑤ ffmpeg   → out/<job>/cuts/cNNN.mp4 ＋ telop.ass → out/<job>/trailer.mp4
   run.mjs          ①〜⑤ を順に実行（--stills で動画生成をスキップ）
 assets/bgm/        フォールバック用フリーBGM
 out/               生成物（git 管理外）
@@ -47,7 +49,8 @@ docs/              企画・調査資料
 - `OPENAI_API_KEY`（必須）
 - `GEMINI_API_KEY`（Phase 2 動画生成。Google AI Studio で発行＋課金有効化）
 - `ELEVENLABS_API_KEY`（BGM を API で作る場合のみ）
-- `TTS_SPEED`（既定 1.15）、`IMG_QUALITY`（既定 low）、`IMG_SIZE`（既定 1536x1024）
+- `TTS_SPEED`（既定 **1.0**）、`TTS_VOICE`（既定 cedar）、`TTS_TRIM`（既定 on）、`IMG_QUALITY`（既定 low）、`IMG_SIZE`（既定 1536x1024）
+- Phase 3 の演出調整: `AMBIENT_VOL`（既定 **0.9**）、`AMBIENT_TARGET_DB`（既定 -20）、`DLG_VOL`、`BGM_VOL`、`XFADE_SEC`、`LETTERBOX`、`PRESENTS_SEC` / `INTER_SEC` / `STOPDOWN_SEC` / `TITLE_SEC`、`VEO_GEN_SEC`（既定 8）
 
 ## ffmpeg / Windows の注意（実機で確認済み・必ず守る）
 
@@ -58,6 +61,7 @@ docs/              企画・調査資料
 - xfade の前に各入力へ `settb=AVTB,fps=30,format=yuv420p,setsar=1`。offset は Σクリップ長 − Σトランジション長 でプログラム計算する。
 - `amix=...:normalize=0`、`loudnorm` の後に `aresample=48000`。ナレーションを sidechaincompress に使うときは `asplit` で分岐。
 - MCP 登録は PowerShell から、`--scope user` か `--scope project` を明示（Git Bash は不可）。
+- （Phase 3 実装で判明）`ass` フィルタに `fontsdir=C\:/Windows/Fonts` は渡せない（`No option name near '/Windows/Fonts'` = `\:` エスケープが効かない）→ 指定しなければ fontconfig が `Yu Gothic` を解決する。`xfade` の 2 入力は**両方に** `settb=AVTB,fps=30,format=yuv420p,setsar=1` を掛ける（片方が `concat`・片方が単一クリップだと timebase が 1/30 と 1/1000000 で食い違い失敗する）。ASS の drawing 座標は「文字ボックスの左端 + 座標」で描かれるので、罫線は `\an7` ＋ `\pos(左端,y)` ＋ 0 起点の座標で置く。
 - （Phase 3 調査で判明）`blend` は `format=gbrp` で行い後で `yuv420p` に戻す（YUV のままだとマゼンタ化）。動画入力に `zoompan` を使うときは `fps=30` を**前**に置く（24fps 入力が縮む）。`crop` の w/h に `t` は使えない（x/y は可）。`asubboost` は約 10 LU 下がるので低域は `bass=` で。重い `curves` は AI 映像の暗部を潰す。`ass` フィルタ（libass）が使え、テロップは `ass=f=out/<job>/telop.ass` で字間・フェード・スケールを一括制御できる。`minterpolate` は使わない（遅く破綻しやすい）。
 
 ## Phase 1 — 最小プロトタイプ（**クローズ 2026-08-29**）
@@ -89,25 +93,35 @@ docs/              企画・調査資料
 ### ToDo
 #### 0. 調査
 - [x] 包括調査 → docs/quality-research.md（打ち手トップ 10、適用案、検証済みフィルタ断片）。試作 out/demo3/trailer_v2_preview.mp4
-#### A. 編集・演出（render.mjs、$0）
-- [ ] カット割りの緩急: クライマックスは 4 秒クリップを 2 秒×2 に割る／スローモーション、タイトル直前に 0.8 秒の黒（無音）
-- [ ] トランジション設計: fadewhite の使い所を絞り、スマッシュカット（カット直結）を混ぜる
-- [ ] テロップ演出: 大型化・字間・グロー（複数レイヤー）・スケールイン、タイトルカードのタイポグラフィ
-- [ ] ルック: teal-orange グレード、ビネット、フィルムグレイン、レターボックス 2.39:1（採否を比較して決める）
-- [ ] 微細な手ブレ・ズーム（zoompan / crop の式）
-#### B. 台本・コピー（script.mjs、$0.01）
-- [ ] シーンタイプ（setup / turn / montage / title）をスキーマで強制し、3 幕の緩急を作る
-- [ ] ナレ＝物語、テロップ＝キャッチの役割分離。体言止め・対比・数字。予告編コピーの見本を few-shot で与える
-- [ ] 最終シーンは「無音＋テロップ」等の余韻パターンを選べるようにする
-#### C. ナレーション（narration.mjs、$0.001）
-- [ ] シーンタイプ別に `instructions` を切り替え（囁き→加速→張る）
-- [ ] 声の比較: cedar / onyx / ash / marin を同じ台本で試聴
-- [ ] **ElevenLabs eleven_v3**（audio tags、Free 枠）を同じ台本で生成し OpenAI と比較 → 採用を決める（`ELEVENLABS_API_KEY` が必要）
-#### D. 動画の動き（video.mjs、$1.2/本）
-- [ ] Veo プロンプトテンプレート: カメラワーク語彙（dolly-in / whip pan / handheld / slow-motion / rack focus）と被写体の明確な動作を強制、ショットサイズをシーンごとに変える
-- [ ] 起点画像のプロンプト改善（動きの余白、被写体の向き、被写界深度）
+#### A. 編集・演出（render.mjs、$0）— **イテレーション 1 完了**
+- [x] カット割りの緩急: `cut_count` に従って各クリップを split/trim（前半優先）。1 カットの上限を scene_type 別に決めて必ずカットランプになるようにした。montage の 1 カットは `setpts`＋`atempo` でスロー、加速点に白 2 フレーム、タイトル直前に 0.5 秒の黒（**全レーン無音**）
+- [x] トランジション設計: **ハードカット主体**。xfade は cold_open→setup の 1 箇所だけ（0.45s）
+- [x] テロップ演出: drawtext → **ASS 1 枚**（`out/<job>/telop.ass`、全テキストを絶対時刻で持つ）。70px / Spacing 14 / `fad` / スケールイン。`telop_timing` で「カット頭に叩く」「ナレの決め言葉に合わせる」を切替。出しっぱなしにならないよう表示秒に上限
+- [x] ルック: teal-orange グレード ＋ ビネット ＋ ブルーム ＋ グレイン ＋ レターボックス 2.39:1（138px）
+- [x] 微細な手ブレ・ズーム: turn / montage に `crop` の x/y 式で手ブレ、全カットに疑似寄り（1.06〜1.8 倍）とドリフト
+- [x] **音**（今回の最重要）: 環境音を主役級に（`AMBIENT_VOL` 0.25→0.9、クリップごとに mean −20dB へ正規化、ナレ中だけ sidechain で −6dB）／セリフレーン（`aecho` で小部屋の響き）／ナレの後処理チェーン（EQ→コンプ→短エコー→リミッタ）／最終段 `loudnorm` → `alimiter` → stopdown ゲート
+- [x] 冒頭 PRESENTS カード・中間カード 2 枚・タグライン付きタイトルカード・`release_line`・キャスト行
+#### B. 台本・コピー（script.mjs / enrich.mjs、$0.02）— **完了**
+- [x] `scene_type`（cold_open / setup / turn / montage / resolve）と `cut_count` をスキーマで強制
+- [x] ナレ＝語り、テロップ＝断言の役割分離。数字・期限・二択を必ず 1 つ。結末を示さない。三点リーダーで間を作る
+- [x] `dialogue`（決め台詞 2〜3 本）／`screen_text`（画面内の小テロップ）／`tagline`／`interstitials`／`release_line`／`presents`／`cast_lines` をスキーマに追加
+- [x] `scripts/enrich.mjs` で**既存フィールドを一切変えずに**旧 script.json を拡張できるようにした（Veo を再生成せず演出だけ載せられる）
+- [ ] 最終シーンは「無音＋テロップ」等の余韻パターンを選べるようにする（stopdown で代替済み・パターン化は未実装）
+#### C. ナレーション（narration.mjs、$0.01）— **完了**
+- [x] `TTS_SPEED` を 1.0 に戻し、速度は `Pacing:` で制御
+- [x] `instructions` を openai.fm 公式のラベル形式（空行区切り）に。共通ブロック ＋ scene_type 別ブロック（囁き→加速→張る）
+- [x] TTS の前後の無音を自動トリム（文中の「……」の間は残す）。ナレ 0.2〜0.4s / セリフ 0.8〜0.9s 短縮できた
+- [x] セリフをナレとは別 voice で生成（speaker → ash / onyx / nova / shimmer）
+- [ ] 声の比較: cedar / onyx / ash / marin を同じ台本で試聴（実音の聴き比べは菊池の判断待ち）
+- [ ] **ElevenLabs eleven_v3**（audio tags、Free 枠）と比較（`ELEVENLABS_API_KEY` が未設定のため未着手）
+#### D. 動画の動き（video.mjs、$1.2〜2.0/本）— **準備のみ完了・実行は判断待ち 💰**
+- [x] Veo プロンプトを **motion-first テンプレート**に更新（camera_beat / motion_beat / env_beat / `Ambient noise:` / セリフは引用符）。`--dry-run` で API を呼ばずに確認できる
+- [x] 8 秒生成 → render 側で前半だけ使う設計に変更（`VEO_GEN_SEC` 既定 8、`VEO_BUDGET_SEC` 48）
+- [ ] 実際に Veo を再生成する（5 シーン × 8 秒 = $2.00。`node scripts/video.mjs demo3 --force`）
+- [ ] 起点画像のプロンプト改善（舞台を 3 箇所以上・ショットサイズ・脅威の可視化）→ script.mjs 側は実装済み、再生成は $0.08
 - [ ] Lite で 1〜2 本比較 → 不足なら Fast を 1 本（要確認）
 #### E. 評価
+- [x] イテレーション 1 完了、菊池の採点待ち（`out/demo3/trailer.mp4` 35.7 秒 / 14 カット / セリフ 3 本 / −13.7 LUFS）
 - [ ] 各イテレーションの 5 軸採点と変更点を docs/trailer-app-plan.md に記録
 - [ ] 全軸 4 以上 → Phase 3 クローズ
 

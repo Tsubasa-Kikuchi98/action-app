@@ -3,16 +3,18 @@
 //   npm run trailer -- "<エピソード文>" demo1
 //
 // 流れ（Phase 2）:
-//   ① 台本 → ｛② 画像 ‖ ③' ナレーション ‖ ④ BGM｝並列 → ③ 動画(Veo) → ⑤ 合成
+//   ① 台本 → ①' 演出(enrich, 不足時のみ) → ｛② 画像 ‖ ③' ナレ+セリフ ‖ ④ BGM｝並列
+//     → ③ 動画(Veo) → ⑤ 合成
 //   ③ を並列グループに入れないのは、起点画像（②）と 4/6/8 に丸めた尺（③'）の両方に依存するため。
 //   --stills を付けると ③ をスキップして Phase 1 相当（静止画 Ken Burns のみ）になる。
 //
 // 各工程の所要秒 / API usage / 推定コスト合計（Veo の秒数を含む）を表示する。
 import fs from "node:fs";
 import {
-  jobPaths, summarizeLog, probeSummary, fmtUSD, isMain,
+  jobPaths, readScript, summarizeLog, probeSummary, fmtUSD, isMain,
 } from "./lib.mjs";
 import { generateScript } from "./script.mjs";
+import { enrichScript, isEnriched } from "./enrich.mjs";
 import { generateImages } from "./images.mjs";
 import { generateNarration } from "./narration.mjs";
 import { generateVideos } from "./video.mjs";
@@ -39,6 +41,16 @@ export async function runAll(episode, job, { force = false, skipScript = false, 
     steps.push({ name: "① 台本", sec: 0, cost: 0 });
   } else {
     await step("① 台本", () => generateScript(episode, job));
+  }
+
+  // ①' 演出情報の付与（enrich）
+  //   script.mjs は Phase 3 から演出フィールドも一緒に出すので、通常はここで何もしない。
+  //   Phase 1/2 に作った古い script.json（--skip-script で再利用する場合）だけ補完される。
+  if (isEnriched(readScript(job))) {
+    console.log("\n===== ①' 演出情報 =====\n  skip (台本が既に演出情報を持っています)");
+    steps.push({ name: "①' 演出", sec: 0, cost: 0 });
+  } else {
+    await step("①' 演出", () => enrichScript(job));
   }
 
   // ② 画像 ‖ ③' ナレーション ‖ ④ BGM（互いに独立なので並列）
