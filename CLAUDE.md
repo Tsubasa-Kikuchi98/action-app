@@ -58,6 +58,7 @@ docs/              企画・調査資料
 - xfade の前に各入力へ `settb=AVTB,fps=30,format=yuv420p,setsar=1`。offset は Σクリップ長 − Σトランジション長 でプログラム計算する。
 - `amix=...:normalize=0`、`loudnorm` の後に `aresample=48000`。ナレーションを sidechaincompress に使うときは `asplit` で分岐。
 - MCP 登録は PowerShell から、`--scope user` か `--scope project` を明示（Git Bash は不可）。
+- （Phase 3 調査で判明）`blend` は `format=gbrp` で行い後で `yuv420p` に戻す（YUV のままだとマゼンタ化）。動画入力に `zoompan` を使うときは `fps=30` を**前**に置く（24fps 入力が縮む）。`crop` の w/h に `t` は使えない（x/y は可）。`asubboost` は約 10 LU 下がるので低域は `bass=` で。重い `curves` は AI 映像の暗部を潰す。`ass` フィルタ（libass）が使え、テロップは `ass=f=out/<job>/telop.ass` で字間・フェード・スケールを一括制御できる。`minterpolate` は使わない（遅く破綻しやすい）。
 
 ## Phase 1 — 最小プロトタイプ（**クローズ 2026-08-29**）
 
@@ -72,11 +73,45 @@ docs/              企画・調査資料
 判明した注意点: Lite は `negativePrompt` 非対応（否定語はプロンプト本文に付与）／起点画像は 16:9 にクロップしてから渡す（3:2 のままだと黒帯ごと動画化）／並列 3 で 429 なし。
 ライブデモ運用方針は docs/trailer-app-plan.md に記録済み。
 
-## Phase 3 以降 — 品質向上（未着手・候補）
+## Phase 3 — 面白さ・迫力の向上（**進行中 2026-08-29〜**）
 
-- 画質: Veo Fast（`veo-3.1-fast-generate-preview`、費用 2 倍）／1080p、gpt-image-2 `medium`
-- 効果音: ElevenLabs SFX で編集点の whoosh / impact / braam を数個生成して `assets/sfx/` に常備
-- BGM: `assets/bgm/` にフリー BGM を配置（現状は ffmpeg 合成のプレースホルダ音）、または ElevenLabs Music（Starter 契約）
-- 写真入力による主役化: 顔写真1枚を `images/edits` に渡して通るか Go/No-Go 検証 → 通れば全シーンに参照画像を固定添付
-- ナレーション: 声（cedar / onyx / ash）と `TTS_SPEED` の実聴比較
-- 運用: 進捗表示付き Web UI、トーン切替テンプレート、$50 チャージで OpenAI Tier 2
+### 目的とクローズ条件
+- 解像度ではなく「面白さ・迫力・映画予告らしさ」を上げる。対象は **ナレーション品質** と **動画品質（台本・動き・編集・演出）**。
+- **BGM と効果音はスコープ外**（触らない）。
+- クローズ条件: 菊池が固定エピソード（demo3「深夜の障害対応」）で生成物を再生し、5 軸（テンポ／ナレの熱量／コピーの切れ／動きの迫力／映画らしさ）が全て 4/5 以上と判断した時点。採点は docs/trailer-app-plan.md に記録。
+
+### 進め方の原則
+- **無料レバーから作り込む**: A 編集・演出（ffmpeg 再レンダ、$0）→ B 台本・コピー（$0.01）→ C ナレーション（$0.001）→ D Veo プロンプト（$1.2/本）。A〜C は demo3 の既存クリップを再利用し Veo を再生成しない。
+- Veo は **Lite でプロンプト改善 → 不足なら Fast** を 1 本試す。
+- **累計課金が $10 を超えそうな場合は都度菊池に確認**してから実行する（A〜C は該当なし）。
+- 比較は同じ入力（demo3 のエピソード文）で A/B。render のみの変更は `node scripts/render.mjs demo3 --force` で即比較できる。
+
+### ToDo
+#### 0. 調査
+- [x] 包括調査 → docs/quality-research.md（打ち手トップ 10、適用案、検証済みフィルタ断片）。試作 out/demo3/trailer_v2_preview.mp4
+#### A. 編集・演出（render.mjs、$0）
+- [ ] カット割りの緩急: クライマックスは 4 秒クリップを 2 秒×2 に割る／スローモーション、タイトル直前に 0.8 秒の黒（無音）
+- [ ] トランジション設計: fadewhite の使い所を絞り、スマッシュカット（カット直結）を混ぜる
+- [ ] テロップ演出: 大型化・字間・グロー（複数レイヤー）・スケールイン、タイトルカードのタイポグラフィ
+- [ ] ルック: teal-orange グレード、ビネット、フィルムグレイン、レターボックス 2.39:1（採否を比較して決める）
+- [ ] 微細な手ブレ・ズーム（zoompan / crop の式）
+#### B. 台本・コピー（script.mjs、$0.01）
+- [ ] シーンタイプ（setup / turn / montage / title）をスキーマで強制し、3 幕の緩急を作る
+- [ ] ナレ＝物語、テロップ＝キャッチの役割分離。体言止め・対比・数字。予告編コピーの見本を few-shot で与える
+- [ ] 最終シーンは「無音＋テロップ」等の余韻パターンを選べるようにする
+#### C. ナレーション（narration.mjs、$0.001）
+- [ ] シーンタイプ別に `instructions` を切り替え（囁き→加速→張る）
+- [ ] 声の比較: cedar / onyx / ash / marin を同じ台本で試聴
+- [ ] **ElevenLabs eleven_v3**（audio tags、Free 枠）を同じ台本で生成し OpenAI と比較 → 採用を決める（`ELEVENLABS_API_KEY` が必要）
+#### D. 動画の動き（video.mjs、$1.2/本）
+- [ ] Veo プロンプトテンプレート: カメラワーク語彙（dolly-in / whip pan / handheld / slow-motion / rack focus）と被写体の明確な動作を強制、ショットサイズをシーンごとに変える
+- [ ] 起点画像のプロンプト改善（動きの余白、被写体の向き、被写界深度）
+- [ ] Lite で 1〜2 本比較 → 不足なら Fast を 1 本（要確認）
+#### E. 評価
+- [ ] 各イテレーションの 5 軸採点と変更点を docs/trailer-app-plan.md に記録
+- [ ] 全軸 4 以上 → Phase 3 クローズ
+
+## Phase 4 以降（候補）
+- 効果音（ElevenLabs SFX で whoosh / impact / braam を `assets/sfx/` に常備）、BGM（フリー素材配置 or ElevenLabs Music）
+- 写真入力による主役化（`images/edits` の Go/No-Go 検証）
+- 進捗表示付き Web UI、トーン切替テンプレート、$50 チャージで OpenAI Tier 2、Veo 1080p
