@@ -44,7 +44,8 @@ const INTER_SEC = Number(process.env.INTER_SEC ?? 1.05);
 const STOPDOWN_SEC = Number(process.env.STOPDOWN_SEC ?? 0.5); // タイトル直前の「無音の黒」
 const TITLE_SEC = Number(process.env.TITLE_SEC ?? 3.4);
 const REVIEW_SEC = Number(process.env.REVIEW_SEC ?? 1.0);   // 煽りテロップ（review_line）カード
-const BUTTON_MIN = Number(process.env.BUTTON_MIN ?? 1.0);   // タイトル後の落ち（button_line）
+const BUTTON_MIN = Number(process.env.BUTTON_MIN ?? 1.0);   // （廃止）
+const END_CARD_SEC = Number(process.env.END_CARD_SEC ?? 2.0); // エンドカード「大ヒット上映中」等
 const BUTTON_MAX = Number(process.env.BUTTON_MAX ?? 1.4);
 // telop_timing: on_silence で音を落とす長さ（テロップだけを見せる）
 const SILENT_TELOP_SEC = Number(process.env.SILENT_TELOP_SEC ?? 0.4);
@@ -161,6 +162,7 @@ function buildAss(events) {
     `Style: TitleMain,${FONTNAME},128,&H00FFFFFF,&H000000FF,&H00101010,&H00000000,-1,0,0,0,100,100,28,0,1,0,0,5,0,0,0,1`,
     `Style: TitleSub,${FONTNAME},44,&H00F0F0F0,&H000000FF,&H00101010,&H00000000,-1,0,0,0,100,100,16,0,1,0,0,5,0,0,0,1`,
     `Style: TitleRule,${FONTNAME},40,&H00FFFFFF,&H000000FF,&H00FFFFFF,&H00000000,0,0,0,0,100,100,0,0,1,0,0,5,0,0,0,1`,
+    `Style: EndCard,${FONTNAME},96,&H00FFFFFF,&H000000FF,&H00101010,&H00000000,-1,0,0,0,100,100,30,0,1,0,0,5,0,0,0,1`,
     `Style: Coming,${FONTNAME},36,&H00E0E0E0,&H000000FF,&H00101010,&H00000000,-1,0,0,0,100,100,22,0,1,0,0,5,0,0,0,1`,
     `Style: Cast,${FONTNAME},24,&H00C8C8C8,&H000000FF,&H00101010,&H00000000,0,0,0,0,100,100,8,0,1,0,0,5,0,0,0,1`,
     "",
@@ -435,12 +437,6 @@ async function buildPlan(job, view) {
       tags: `{\\pos(960,580)\\fad(450,380)}`, text: view.tagline,
     });
   }
-  if (view.release_line) {
-    ass.push({
-      style: "Coming", start: T0 + 1.35, end: T1,
-      tags: `{\\pos(960,770)\\fad(400,380)}`, text: view.release_line,
-    });
-  }
   ass.push({
     style: "Coming", start: T0 + 1.7, end: T1,
     tags: `{\\pos(960,832)\\fad(400,380)}`, text: "C O M I N G   S O O N",
@@ -452,20 +448,15 @@ async function buildPlan(job, view) {
     });
   }
 
-  // --- button（タイトル後の落ち）------------------------------------------
-  // trailer-structure §2 の普遍則 ④「タイトル後に必ず button」。
-  // 予告の重厚さを一度も崩さずに来て、ここで初めて現実に戻る。
-  if (view.button_line) {
-    const btnFile = path.join(p.dlg, "button.wav");
-    const hasBtn = fs.existsSync(btnFile) && fs.statSync(btnFile).size > 0;
-    const btnSec = hasBtn ? await probeDuration(btnFile) : 0;
-    const want = Math.min(BUTTON_MAX, Math.max(BUTTON_MIN, btnSec + 0.35));
-    const outSec = Math.max(want, btnSec + 0.25); // 音が切れるくらいなら上限を超えて伸ばす
-    const b = push({ kind: "card", color: "black", outSec });
-    if (hasBtn) btn.push({ file: btnFile, at: b.absStart + 0.12, sec: btnSec, text: view.button_line });
+  // --- エンドカード（release_line）------------------------------------------
+  // 2026-08-30 方針: タイトル後の「落ち」セリフ（button）は廃止。
+  // 本物の予告と同じく「大ヒット上映中」「近日公開」等のテロップで締める。旧台本の button_line は無視する。
+  {
+    const endText = view.release_line || "近日公開";
+    const e = push({ kind: "card", color: "black", outSec: END_CARD_SEC });
     ass.push({
-      style: "Button", start: b.absStart + 0.05, end: b.absStart + b.outSec,
-      tags: `{\\pos(960,540)\\fad(120,180)}`, text: view.button_line,
+      style: "EndCard", start: e.absStart + 0.05, end: e.absStart + e.outSec,
+      tags: "{\pos(960,540)\fad(250,300)\blur0.8\fscx103\fscy103\t(0,600,\fscx100\fscy100)}", text: endText,
     });
   }
 
