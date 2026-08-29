@@ -13,38 +13,35 @@
 | BGM | ElevenLabs **Starter $6/月**（1か月だけ）＋ フリーBGMをローカル保険 | Music API は**有料契約者限定**（Free 不可）。Suno は 2026-09-03 から無料枠が生涯7回DLのみに |
 | ナレーション | OpenAI `gpt-4o-mini-tts`（`instructions` で予告編演技を指示可） | 60秒 約$0.015。保険に VOICEVOX（無料・要クレジット表記） |
 
-## 2. アーキテクチャ（Phase 2 版・2026-08-29 更新）
-
-Phase 1（静止画＋Ken Burns、約 47 秒、1本 $0.1）は完了。Phase 2 では全シーンを Veo で動画化し、全体を 20 秒前後に短縮する。
+## 2. アーキテクチャ（Phase 3-A/B/C 実装後・2026-08-30 更新）
 
 ```
-入力: エピソード文 (+ 任意: 主役の写真1〜4枚 ※Phase 3)
+入力: エピソード文（＋任意: 主役の写真 ※Phase 4）
   │
-  ▼ ① 台本生成  gpt-5.6-luna + Structured Outputs      ~10秒 / $0.003
-  │   { title, scenes[5]{ narration(≈15字目安), telop, image_prompt, video_prompt, duration_sec } }
-  │
-  ▼ ② 静止画 ×5  gpt-image-2 / 1536x1024 / low〜medium   ~30秒 / $0.02〜0.2
-  │   （動画の起点フレーム。Veo 失敗時はこのままフォールバック）
-  │
-  ├─▶ ③ 動画 ×5  Veo 3.1 Lite (Gemini API) image-to-video   1〜6分 / $0.05/秒 ≒ $1.0
-  │      720p / 4・6・8秒 / 音声同梱（環境音として使用）
-  │      並列投入 → ポーリング → 即DL → out/<job>/vid/sN.mp4
-  │      失敗・拒否・タイムアウト → そのシーンだけ静止画 Ken Burns (motion: "still")
-  │
-  ├─▶ ③' ナレーション  gpt-4o-mini-tts cedar speed 1.15 → wav   ~10秒 / $0.0001
-  │      実尺から duration_sec を 4/6/8 秒に丸める
-  │
-  └─▶ ④ BGM  assets/bgm/ のフリー素材 → ElevenLabs Music → ffmpeg 合成音 の順にフォールバック
-  │
-  ▼ ⑤ ffmpeg シーン別レンダ
-  │    動画シーン: 720p→1080p 拡大 → trim/apad → drawtext(テロップ)
-  │    静止画シーン: scale×4 → zoompan → drawtext
-  │    → scenes/sN.mp4 ＋ タイトルカード 2.5秒
-  ▼ ⑥ ffmpeg 最終合成  -/filter_complex fc.txt
-  │    映像: xfade チェーン（fade / fadewhite 0.16s / fadeblack）
-  │    音声: ナレーション ＋ Veo環境音(−12dB ダッキング) ＋ BGM(ダッキング) → amix(normalize=0) → loudnorm → aresample=48000
-  → trailer.mp4  1920x1080 / 30fps / 約 20〜25 秒
+  ▼ ① 台本生成   script.mjs  gpt-5.6-luna + Structured Outputs                ~10秒 / $0.003
+  │    { title, tagline, presents, release_line, cast_lines, interstitials[2],
+  │      scenes[5]{ scene_type, narration, telop, telop_timing, dialogue+speaker, screen_text[],
+  │                 image_prompt, motion_beat, camera_beat, ambient, cut_count, duration_sec } }
+  │    旧 script.json は ①' enrich.mjs で非破壊的に同形へ拡張（$0.02）
+  ▼ ② 起点静止画 ×5  images.mjs  gpt-image-2 / 1536x1024                       ~30秒 / $0.02〜0.2
+  ├─▶ ③ 動画 ×5   video.mjs  Veo 3.1 Lite image-to-video 720p（motion-first、セリフは引用符） 1〜6分 / $0.05/秒
+  │     並列 3 → ポーリング → 即DL。失敗はそのシーンだけ still（Ken Burns）
+  ├─▶ ③' 音声     narration.mjs  gpt-4o-mini-tts: ナレ 5 本(cedar, scene_type 別 instructions) + セリフ 3 本(別声)
+  └─▶ ④ BGM      bgm.mjs  assets/bgm/ → ElevenLabs Music → ffmpeg 合成音（現状）
+  ▼ ⑤ 合成       render.mjs  ffmpeg（-/filter_complex）                         ~30秒 / $0
+  │    タイムライン: scene_type 別カット長上限で split/trim → 14 カット + カード 6 枚
+  │      （PRESENTS / 中間カード×2 / 黒 0.5s 全レーン無音 / タイトル+タグライン+キャスト）
+  │      疑似寄り・スロー・白フラッシュ・手ブレ・ハードカット主体
+  │    ルック: 軽い curves + eq + vignette → bloom(gbrp blend) → grain → レターボックス 138px
+  │    文字: 全テキストを 1 枚の ASS（telop.ass）で。字間・fad・blur・スケールイン
+  │    音 4 レーン: 環境音（Veo 音声、クリップ毎 −20dBFS 正規化 ×0.9、ナレ中 −6dB）
+  │               ナレ（EQ→コンプ→短エコー→リミッタ）／セリフ（小部屋の残響）／BGM ×0.22
+  │               → amix(normalize=0) → loudnorm I=-14 → alimiter → 48kHz
+  → trailer.mp4 1920x1080 / 30fps（demo3: 35.7 秒、−13.7 LUFS）
+
+run.mjs: ① → ①'(不足時) → ② → ③ → ③' → ④ → ⑤。--stills で ③ をスキップ
 ```
+設計原則: 工程ごとに独立スクリプト、中間生成物は `out/<job>/` に残す。台本 JSON が唯一の真実で、演出判断はすべてそこに書かれ render は解釈するだけ。
 
 ### 1本あたりの見積（Phase 2）
 | 項目 | 費用 | 時間 |
