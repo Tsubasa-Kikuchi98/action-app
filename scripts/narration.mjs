@@ -36,44 +36,35 @@ async function trimSilence(file) {
 // ---------------------------------------------------------------- 演技指示
 // openai.fm の公式プリセットはすべて「ラベル: 内容」を空行で区切る形式。
 // 共通ブロック（全シーン同一）— 映画予告ナレーターの声そのものを定義する。
-export const NARRATION_COMMON = `Voice Affect: Deep, resonant and gravelly; a seasoned movie-trailer narrator with a heavy chest voice that sits low in the room.
+export const NARRATION_COMMON = `Voice Affect: A Japanese TV movie-trailer announcer — bright, forward, and high-energy. Voice placed high and forward in the mask, not down in the chest. Big projection, as if calling across a packed theater.
 
-Tone: Dark, ominous and monumental. Absolutely serious — never cheerful, never conversational.
+Tone: Excited, urgent, and larger-than-life. Every line is an announcement. Absolutely serious about the content — never mocking, never sleepy, never conversational.
 
-Pronunciation: Low in the register. Consonants land hard and clean; vowels are held and full-bodied.
+Pacing: Fast and punchy. Attack each phrase hard and immediately. Pauses only where "……" appears, and keep them short and tense. Do not drag any syllable.
 
-Punctuation: Ellipses (……) mark deliberate silence — hold them fully before continuing. A period is a hard, complete stop, not a comma.`;
+Pronunciation: Crisp consonants, bright vowels, clear Japanese diction. Pitch rises into key words; sentence endings land hard and clean, never trailing off.
 
-// scene_type 別ブロック（quality-research §C の案）。囁き → 加速 → 張る の緩急を作る。
-export const NARRATION_BY_TYPE = {
-  cold_open: `Pacing: Very slow and restrained. Let the first words hang in the air.
+Punctuation: "……" is a short, charged breath. A period is a sharp, complete stop.`;
 
-Emotion: Cold stillness before anything has gone wrong. Almost a whisper, but never weak.
+// scene_type 別ブロック。全体を高テンションに保ちつつ、序盤→終盤で熱量をさらに上げる。
+const NARRATION_BY_TYPE = {
+  cold_open: `Emphasis: Bright and inviting, like the opening of a summer blockbuster spot. Energy already high, but with a smile in the voice. Lean into the time-setting words.
 
-Emphasis: Lean on the time and the place. Everything else stays flat and quiet.`,
-  setup: `Pacing: Slow, with a forward lean. Each phrase pulls slightly ahead of the last.
+Emotion: Anticipation. Something big is about to be announced.`,
+  setup: `Emphasis: Snap the pivot word ("しかし") hard and lift the pitch right after it. Faster than the opening.
 
-Emotion: Dawning unease. Something is beginning to move.
+Emotion: Alarm breaking through the excitement — the announcer has just seen the twist.`,
+  turn: `Emphasis: Hit every number and noun like a drum. Rapid-fire, almost breathless, pitch high.
 
-Emphasis: Push on the turn word — the moment the situation changes.`,
-  turn: `Pacing: Tightening and clipped. Minimal pauses; do not let the line breathe.
+Emotion: Peak intensity. This is the moment the audience must not look away from.`,
+  montage: `Emphasis: Maximum drive. Ride the rhythm of the cuts — short, hammering phrases, rising pitch to the end.
 
-Emotion: Contained alarm held just under the surface. Pressure, not panic.
+Emotion: Thrill of the counter-attack. Loud, fast, exhilarated.`,
+  resolve: `Emphasis: Highest energy of the whole piece, then a hard, clean stop on the last word. Pitch peaks on the final phrase.
 
-Emphasis: Hit the threat itself hard, then cut the line short.`,
-  montage: `Pacing: Slow and immovable, but dense — every syllable carries weight.
-
-Emotion: Steel-hard resolve. The counter-attack has begun.
-
-Emphasis: Drive through the verb of action and land on it.`,
-  resolve: `Pacing: Extremely slow and monumental. Leave a long silence before the final words.
-
-Emotion: Exhausted gravity with one last spark of defiance. Do not sound relieved — nothing is finished.
-
-Emphasis: Let the final phrase drop to the bottom of the register and stop dead.`,
+Emotion: Cliffhanger. Nothing is resolved — sell the question, not the answer.`,
 };
 
-/** シーンに与える instructions を組み立てる。 */
 export function narrationInstructions(sceneType) {
   const extra = NARRATION_BY_TYPE[sceneType] ?? NARRATION_BY_TYPE.setup;
   return `${NARRATION_COMMON}\n\n${extra}`;
@@ -162,7 +153,7 @@ async function tts(job, { file, text, voice, instructions, step, meta }) {
             input: text,
             instructions,
             // quality-research §5: speed は公式見解が矛盾。1.0 に戻し速度は Pacing: で制御する。
-            speed: Number(process.env.TTS_SPEED ?? 1.0),
+            speed: Number(process.env.TTS_SPEED ?? 1.1),
             response_format: "wav",
           }),
         { label: step }
@@ -188,7 +179,7 @@ export async function generateNarration(job, { force = false } = {}) {
   const data = raw; // 書き戻す先は元データ（拡張フィールドを壊さない）
   const voice = process.env.TTS_VOICE ?? "cedar";
   const round = roundingEnabled();
-  const speed = Number(process.env.TTS_SPEED ?? 1.0);
+  const speed = Number(process.env.TTS_SPEED ?? 1.1);
 
   const dlgCount = view.scenes.filter((s) => s.dialogue).length;
   console.log(

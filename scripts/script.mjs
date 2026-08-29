@@ -216,9 +216,9 @@ function structureBlock(style) {
 | 1.4-6.0 | S1 cold_open（1 カット） | 静かなワイド「その日……」 | 16 |
 | 6.0-10.4 | S2 setup（2 カット） | 「しかし……」＋ テロップ① | 16 |
 | 10.4-11.8 | 中間カード① | 時期宣言「この夏、」 | 0 |
-| 11.8-16.2 | S3 turn（4 カット） | 畳みかけ ＋ **セリフ①（拒絶）** | 14 |
+| 11.8-16.2 | S3 turn（4 カット） | **セリフ①（拒絶）** ＋ テロップ。ナレなし | 0 |
 | 16.2-17.0 | 中間カード② | 賭け金 = stake | 0 |
-| 17.0-22.6 | S4 montage（5〜6 カット） | 短いナレ ＋ テロップ② ＋ **セリフ②（号砲）** | 11 |
+| 17.0-22.6 | S4 montage（5〜6 カット） | **セリフ②（号砲）** ＋ テロップ②。ナレなし | 0 |
 | 22.6-25.4 | S5 resolve（3 カット） | 「今、__が動き出す」 | 16 |
 | 25.4-26.0 | stopdown | 黒＋完全無音 | 0 |
 | 26.0-29.0 | タイトル | title + tagline + release_line | 0 |
@@ -226,7 +226,11 @@ function structureBlock(style) {
 
 - **映像は合計 20〜22 秒**、残り 8〜10 秒はカードと無音。duration_sec の合計はこの範囲に収める。
 - **ナレ字数は降順ランプ 16 / 16 / 14 / 11 / 16 字、合計 ${NAR_TOTAL_MAX} 字以内**（montage が最短）。
-- **セリフは必須。turn と montage には必ず 1 本ずつ入れる**（拒絶＝turn／号砲＝montage）。resolve に 3 本目（息継ぎ・宣言）を置いてもよい。空文字で済ませない。4 本目の「落ち」は button_line。`;
+- **各シーンの声は「ナレーション」か「セリフ」のどちらか一方だけ。両方は入れない。**
+  - cold_open / setup / resolve = **ナレーションのみ**（dialogue は空文字）
+  - turn / montage = **セリフのみ**（narration は空文字。turn＝拒絶／宣告、montage＝号砲）
+  - セリフの無い声の空白はテロップと環境音が埋める。4 本目の「落ち」は button_line。
+- ナレ字数ランプは声のあるシーンだけに適用（cold_open 16 / setup 16 / resolve 16、合計 50 字以内）。`;
 }
 
 export function buildSystemPrompt(style = "narration") {
@@ -239,12 +243,12 @@ ${COPY_PRINCIPLES}
 
 ${structureBlock(style)}
 
-# scene_type
-1. cold_open —「その日……」の静かな立ち上がり。**冒頭3秒で強いビジュアルを1つ**立てる
-2. setup   —「しかし……」で始まる不穏な展開
-3. turn    — 最も追い詰められた瞬間。短い言葉で畳みかける
-4. montage — 反撃。「今、__が動き出す」
-5. resolve — 締め。**結末は示さない**。問いか宣言で終える
+# scene_type（冒頭は平和、次で発覚、最後は解決を見せずに切る）
+1. cold_open — **平和な日常**。明るく穏やかなシーン（金曜の夕方、退勤、連休前の浮ついたオフィス）。問題の「種」だけを観客に見せる（背後で回り続ける画面など）。ナレは「その日……」の静かな立ち上がり
+2. setup   — **発覚**。問題が最初に目に入る瞬間。「しかし……」。表情が固まり、周囲が振り返る
+3. turn    — 事態の深刻さが数字・言葉で突きつけられる。最も追い詰められた瞬間。短い言葉で畳みかける
+4. montage — 対応行動（召集・移動・突入・報告へ向かう）。「今、__が動き出す」
+5. resolve — **解決の直前で切る**。受話器を取る／Enter に指が触れる／扉を開ける寸前。**結果は絶対に見せない**（復旧・請求取消・夜明け・「静かになった」は禁止）。ナレは問いか宣言で終える
 ※ シーン数（${SCENE_COUNT}）が 5 以外のときは、この流れをその数に圧縮／分割する。
 
 # ナレーション（narration）
@@ -263,13 +267,13 @@ ${structureBlock(style)}
 - duration_sec は先頭から ${DURATION_RAMP.join(", ")}（Veo の制約で 4 / 6 / 8 のみ。**montage を最長にする**）。
 - cut_count は先頭から 1, 1, 2, 4, 3。montage だけ 6 まで許す。終盤ほどカットを細かく割る。
 
-# 視覚の翻訳（visual_metaphor → image_prompt / motion_beat）
-- 各シーンでまず visual_metaphor を決める（「現実 → 演出」の 1 行）。**上の翻訳文法 16 ルールに必ず沿わせる**。
-- **montage と resolve は「反撃・復旧パートの翻訳」（召集 → 出動・移動 → 突入 → 作戦会議 → 決着）から選ぶ**。失敗の崩壊だけを繰り返さない。
-  montage は移動・突入（走る／飛び乗る／蹴り開ける／隔壁が開く）を 1〜1.5 秒で並べられる素材にし、resolve は決着（カウントダウンが止まる／瓦礫が戻る／街に灯りが戻る／夜明け）にする。
+# 視覚の演出（visual_metaphor → image_prompt / motion_beat）
+- 各シーンでまず visual_metaphor を「**現実の出来事（そのまま）＋ 演出の誇張**」の 1 行で書く（例: 「連休前の退勤 → 明るい夕方のオフィスを笑顔で出る社員、背後のモニターでログが流れ続ける」）。**上の演出文法に必ず沿わせる**。
+- **出来事を別物に置き換えない**（城門・石板・砂漠・宇宙・怪獣・ミサイル・碑文は禁止）。観客が 1 秒で何が起きているか分かること。
+- **montage は対応行動**（召集・移動・突入・報告へ向かう）を 1〜1.5 秒で並べられる素材に。**resolve は解決の直前で止める**（受話器を取る・Enter に指・扉の前）。決着は映さない。
 - **窓ガラスが割れる瞬間の破片と武器は書かない**（Veo が弾く）。「割れた直後」で代替する。
-- image_prompt はその演出をそのまま英語で描写する。**舞台は予告全体で最低3箇所に散らす**（オフィスだけにしない）。
-- **脅威・障害を具体的な視覚要素で1つ描く**（赤い警告灯、カウントダウン、崩れるラック、迫る影）。抽象的にしない。
+- image_prompt はその演出をそのまま英語で描写する。舞台は現実の場所の範囲で 2〜3 箇所に散らす（オフィス、自宅、通勤路、会議室、サーバールーム）。
+- **脅威・障害は実物の視覚要素で 1 つ描く**（赤く点滅する金額、回り続けるログ、火花を上げるラック、鳴り続ける電話）。抽象化しない。
 - ショットサイズをシーンごとに変える（wide → medium → close-up → extreme close-up）。
 - 現代日本の情景。画面内に文字・ロゴ・字幕を描かせない。流血・負傷・実在ブランド・実在人物の顔は書かない。
 
@@ -334,6 +338,10 @@ export function normalize(data, episode, style = DEFAULT_STYLE) {
     const type = SCENE_TYPES.includes(s.scene_type) ? s.scene_type : guessSceneType(i, n);
     const rawDlg = oneLine(s.dialogue);
     const dialogue = rawDlg && allowed.has(type) && kept < dlgMax ? (kept++, rawDlg.slice(0, 20)) : "";
+    // 声はシーンごとに一方だけ: turn / montage はセリフ優先、それ以外はナレ優先
+    const voiceScene = ["turn", "montage"].includes(type);
+    const narrationText = voiceScene && dialogue ? "" : String(s.narration ?? "").trim();
+    const dialogueText = !voiceScene && narrationText ? "" : dialogue;
 
     let timing = TELOP_TIMINGS.includes(s.telop_timing)
       ? s.telop_timing
@@ -357,8 +365,8 @@ export function normalize(data, episode, style = DEFAULT_STYLE) {
       motion_beat: String(s.motion_beat ?? "").trim(),
       camera_beat: String(s.camera_beat ?? "").trim() || DEFAULT_CAMERA_BEAT[type],
       ambient: String(s.ambient ?? "").trim(),
-      dialogue,
-      speaker: dialogue && SPEAKERS.includes(s.speaker) && s.speaker !== "none" ? s.speaker : dialogue ? "male_mature" : "none",
+      dialogue: dialogueText,
+      speaker: dialogueText && SPEAKERS.includes(s.speaker) && s.speaker !== "none" ? s.speaker : dialogueText ? "male_mature" : "none",
       telop_timing: timing,
       screen_text: (Array.isArray(s.screen_text) ? s.screen_text : [])
         .map((t) => oneLine(t))
@@ -439,7 +447,6 @@ export function lintScript(data) {
     if (nars > 2) warns.push(`案 B なのにナレが ${nars} 本あります（2 本まで）`);
   } else {
     const empty = data.scenes.filter((s) => !s.narration).map((s) => `s${s.index}`);
-    if (empty.length) warns.push(`案 A なのに narration が空のシーン: ${empty.join(", ")}`);
   }
   return warns;
 }
