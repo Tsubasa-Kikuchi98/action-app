@@ -1,0 +1,29 @@
+{
+  "name": "action-app",
+  "version": "1.0.0",
+  "description": "アクションをテーマにしたアプリ（社内AIハッカソン）。",
+  "main": "index.js",
+  "directories": {
+    "doc": "docs"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "trailer": "node scripts/run.mjs"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Tsubasa-Kikuchi98/action-app.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/Tsubasa-Kikuchi98/action-app/issues"
+  },
+  "homepage": "https://github.com/Tsubasa-Kikuchi98/action-app#readme",
+  "type": "module",
+  "dependencies": {
+    "dotenv": "^17.4.2",
+    "openai": "^7.8.0"
+  }
+}

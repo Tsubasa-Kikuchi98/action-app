@@ -8,3 +8,9 @@ build/
 Thumbs.db
 __pycache__/
 .venv/
+
+# 生成物・素材
+out/
+assets/bgm/*.mp3
+assets/bgm/*.wav
+!.env.example
