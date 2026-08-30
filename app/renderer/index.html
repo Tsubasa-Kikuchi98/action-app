@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; media-src media: 'self'; img-src media: 'self' data:; style-src 'self'; script-src 'self'"
+    />
+    <title>action-app — 予告編ジェネレーター</title>
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <header class="bar">
+      <h1>action-app <span class="sub">予告編ジェネレーター</span></h1>
+      <span id="mockBadge" class="badge hidden">MOCK モード（API を呼びません）</span>
+      <span id="rootPath" class="root"></span>
+    </header>
+
+    <main>
+      <!-- ------------------------------------------------ 入力 -->
+      <section class="card" id="inputCard">
+        <h2>エピソード</h2>
+        <textarea
+          id="episode"
+          rows="6"
+          placeholder="例）金曜の 22 時、本番リリースの直前に設定ファイルを 1 行だけ書き換えた。デプロイした瞬間に全社の勤怠システムが落ちて、先輩と上司と 3 人で朝までロールバックを試し続けた。原因はカンマ 1 個だった。"
+        ></textarea>
+
+        <div class="row">
+          <label>
+            構成
+            <select id="style">
+              <option value="nolan">nolan（20 秒 / 3 カット / ナレなし）</option>
+              <option value="narration">narration（35 秒前後 / 5 シーン / ナレ主導）</option>
+            </select>
+          </label>
+          <label>
+            ジョブ名
+            <input id="job" type="text" spellcheck="false" />
+          </label>
+          <label class="check" title="既存の中間生成物を無視して作り直します（費用がかかります）">
+            <input id="force" type="checkbox" /> 作り直す（--force）
+          </label>
+          <label class="check" title="Veo を呼ばず静止画 Ken Burns にします">
+            <input id="stills" type="checkbox" /> 動画をスキップ（--stills）
+          </label>
+        </div>
+
+        <div class="row actions">
+          <button id="go" class="primary">動画生成</button>
+          <button id="stop" class="danger" disabled>中止</button>
+          <span id="status" class="status"></span>
+        </div>
+      </section>
+
+      <!-- ------------------------------------------------ 進捗 -->
+      <section class="card" id="progressCard">
+        <h2>
+          進捗
+          <span class="totals">
+            合計 <b id="totalSec">0.0</b> 秒 / 概算 <b id="totalCost">$0.0000</b><span id="mockCostNote" class="hidden">（想定額・実課金なし）</span>
+          </span>
+        </h2>
+        <table class="steps">
+          <thead>
+            <tr><th>工程</th><th>状態</th><th class="num">経過</th><th class="num">概算費用</th><th>詳細</th></tr>
+          </thead>
+          <tbody id="steps"></tbody>
+        </table>
+
+        <details id="logBox">
+          <summary>ログ（<span id="logCount">0</span> 行）</summary>
+          <pre id="log"></pre>
+        </details>
+      </section>
+
+      <!-- ------------------------------------------------ 完成 -->
+      <section class="card hidden" id="resultCard">
+        <h2>完成 <span id="resultMeta" class="totals"></span></h2>
+        <video id="player" controls preload="metadata"></video>
+        <div class="row actions">
+          <button id="openFolder">フォルダを開く</button>
+          <button id="showScript">台本を見る</button>
+        </div>
+        <details id="scriptBox" class="hidden"><summary>script.json</summary><pre id="scriptJson"></pre></details>
+      </section>
+
+      <!-- ------------------------------------------------ 履歴 -->
+      <section class="card" id="historyCard">
+        <h2>過去のジョブ <button id="reloadJobs" class="link">再読込</button></h2>
+        <ul id="jobs" class="jobs"></ul>
+      </section>
+    </main>
+
+    <script src="app.js"></script>
+  </body>
+</html>

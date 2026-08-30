@@ -46,6 +46,32 @@ node scripts/images.mjs myjob && node scripts/video.mjs myjob
 node scripts/sfx.mjs && node scripts/bgm.mjs myjob && node scripts/render.mjs myjob --force
 ```
 
+## デスクトップアプリ（Phase 4）
+
+エピソード文をテキストボックスに入れて「動画生成」を押すだけで `out/<job>/trailer.mp4` まで作る
+Electron アプリ。社内発表のデモ用で、この PC で起動できれば十分（exe 化はしない）。
+
+```bash
+npm install                 # electron は devDependency
+cp .env.example .env        # OPENAI_API_KEY / GEMINI_API_KEY を設定
+npm run app                 # 実 API で生成する
+
+TRAILER_MOCK=1 npm run app  # API を呼ばずに UI を確認する（合成だけ本物の ffmpeg）
+```
+
+画面は 1 枚。エピソード入力・構成（`nolan` 既定 / `narration`）・ジョブ名（既定 `job-YYYYMMDD-HHmm`）を
+指定して「動画生成」を押すと、工程行（① 台本 → ⓪ 基準画像 → ② シーン画像 → ③' 音声/BGM/効果音 →
+③ 動画（Veo）→ ⑤ 合成）に状態・経過秒・概算費用が出ます。Veo は「n/3 本完了」。完成すると
+その場で mp4 を再生でき、「フォルダを開く」「台本を見る」と過去ジョブ一覧（クリックで再生）が使えます。
+「中止」は以後の工程を止めます（実行中の工程は最後まで走ります）。途中で失敗しても、
+その工程の行が赤くなるだけで中間生成物は `out/<job>/` に残ります。
+
+- `TRAILER_MOCK=1` は台本・画像・動画・TTS・BGM・効果音をダミー（ffmpeg で作った単色 PNG /
+  トーン wav / 静止 mp4）に差し替えます。**合成は本物の ffmpeg** を通るので、UI と
+  タイムライン設計の両方を $0 で確認できます。表示される費用は「実 API なら幾らか」の想定額です。
+- 起動しないときは `ELECTRON_RUN_AS_NODE` が設定されていないか確認してください
+  （設定されていると electron が素の Node として起動し `electron` モジュールを解決できません）。
+
 ## コード構成（クリーンアーキテクチャ）
 
 依存は**内向きのみ**（`domain ← usecases ← adapters ← cli`）。
