@@ -1,5 +1,7 @@
 # action-app
 
+> **ダウンロード（Windows）**: [Releases](https://github.com/Tsubasa-Kikuchi98/action-app/releases/latest) から `action-app-1.0.0-portable.exe` を取得。Node.js / ffmpeg 不要。使い方は下記「A. exe で使う」。
+
 アクションをテーマにしたアプリ（社内AIハッカソン）。
 
 ## ドキュメント
