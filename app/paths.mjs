@@ -14,6 +14,10 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { app } from "electron";
 
+// 開発起動（npm run app）でも userData を %APPDATA%\action-app\ に揃える。
+// 既定だと未パッケージ時は %APPDATA%\Electron\ になり、exe 版と設定の置き場がずれる。
+app.setName("action-app");
+
 /** exe に同梱したリソース（resources/）。開発時は null。 */
 export const bundledDir = () => (app.isPackaged ? process.resourcesPath : null);
 
