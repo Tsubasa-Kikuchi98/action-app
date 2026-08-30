@@ -8,7 +8,8 @@
   },
   "scripts": {
     "test": "node --test \"test/**/*.test.mjs\"",
-    "trailer": "node scripts/run.mjs"
+    "trailer": "node scripts/run.mjs",
+    "app": "electron app/main.mjs"
   },
   "repository": {
     "type": "git",
@@ -26,5 +27,8 @@
     "@google/genai": "^2.19.0",
     "dotenv": "^17.4.2",
     "openai": "^7.8.0"
+  },
+  "devDependencies": {
+    "electron": "^44.0.0"
   }
 }

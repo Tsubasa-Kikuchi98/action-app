@@ -268,6 +268,69 @@ node scripts/sfx.mjs && node scripts/bgm.mjs <job> && node scripts/render.mjs <j
 20.00 秒 / 3 カット / 6 カード / −15.0 LUFS / 1本 $1.36（台本 $0.029 + 画像 3 枚 medium $0.126 + Veo 3×8 秒 $1.20 + ElevenLabs 37 クレジット）。
 Veo は 3 本中 1 本が音声の安全フィルタで拒否（課金なし）→ `ambient` から `distant thunder` を外して再投入で成功。
 
+## Phase 4 — デスクトップアプリ（Electron）（**追加 2026-08-30**）
+
+「テキストボックスにエピソード文を入れて『動画生成』を押すだけで予告編 mp4 が出る」発表デモ用アプリ。
+起動は `npm run app`（= `electron app/main.mjs`）。`TRAILER_MOCK=1 npm run app` で API を呼ばずに確認できる。
+
+### 構成（`app/` 配下。`src/` は 1 行も変更していない）
+
+```
+app/
+  main.mjs            Electron main（ESM）。ウィンドウ / IPC / media:// プロトコル。
+                      パイプラインは子プロセスにせず main の中で直接呼ぶ（log.jsonl と中間生成物を CLI と同じに保つ）
+  preload.cjs         contextBridge で window.trailer を公開（defaults / jobs / script / openFolder / generate / cancel / onEvent）
+  pipeline.mjs        runPipeline と同じ順序・条件で usecases を順に呼び、工程の開始・終了をイベント化する
+  mock.mjs            TRAILER_MOCK=1 のときだけ使うポート実装（台本 / 画像 / 音声 / 動画のダミー）
+  devshot.mjs         検証用。TRAILER_SHOT_DIR を指定したときだけ読まれ、UI を自動操作して PNG を保存する
+  renderer/           index.html / app.js / style.css（フレームワークなし。Node には触らない）
+```
+
+- Electron は **devDependency に 44.0.0 で固定**。`package.json` は `scripts.app` と `devDependencies.electron` の追加だけ。
+- セキュリティ既定: `contextIsolation: true` / `nodeIntegration: false` / `sandbox: true`。
+  renderer は preload 経由でしか main に触れない。mp4 は `file://` を直接読ませず、
+  **`media://local/out/<job>/trailer.mp4`** という専用スキーム（main で `out/` の外と対象外拡張子を 403）で配る。
+- **preload は `.cjs`**（sandbox 有効時は CJS のみ）。JSDoc に `out/*/…` と書くと `*/` でコメントが閉じて
+  `SyntaxError` になり、preload が黙って読み込まれず `window.trailer` が undefined になる（実際に踏んだ）。
+- `import { app, BrowserWindow } from "electron"` は Electron 本体で起動している限り正しい。
+  環境に `ELECTRON_RUN_AS_NODE=1` があると素の Node として起動してしまい
+  「does not provide an export named 'BrowserWindow'」になる。
+
+### 進捗の取り方
+
+`src/` を触れないので、`app/pipeline.mjs` が `runPipeline` と同じ順序（① 台本 →〔①' 演出〕→ ⓪ 基準画像 →
+｛② 画像 ‖ ③' ナレ + ④ BGM + ⑥ 効果音｝→ ③ Veo → ⑤ 合成）で usecase を呼び、工程の開始・終了を IPC で流す。
+工程内部の粒度は **`JobStore` ポートの `timed()` をラップ**して拾う（API 1 本ごとに 1 回呼ばれ `{sec, cost}` を返すので、
+log.jsonl を読み直さずに費用の積算と Veo の「n/3 本完了」が取れる）。`console.log` は実行中だけ横取りして
+ログ欄に流す（CLI の出力がそのまま画面に出る）。中止は工程の境目で見るフラグ方式（実行中の工程は最後まで走る）。
+
+### モックモード（`TRAILER_MOCK=1`）
+
+`createDeps()` が組んだ依存のうち **外部 API を呼ぶポートだけ**を差し替える（`applyMocks()`）。
+`store` / `media` / `files` / `refs` は本物なので、**⑤ 合成は本物の ffmpeg を通る**。
+
+| ポート | モック |
+|---|---|
+| `text` | style から選ぶ固定の台本 JSON（`normalize()` を通るので script.json は本物と同じ形） |
+| `image` | ffmpeg の単色＋ノイズ＋ビネット PNG（プロンプトのハッシュで色を変える） |
+| `speech` | ffmpeg の低音トーン wav（文字数に比例した尺。無音だと `TTS_TRIM` に消されるので必ず鳴らす） |
+| `video` | ffmpeg で起点画像を静止させた 1280x720 / 24fps / h264+aac の mp4（Veo の実出力に合わせる） |
+| `music` / `sound` | `available() = false` にして既存の ffmpeg 合成音フォールバックに落とす |
+
+実測（mock / nolan）: 20.0 秒の trailer.mp4 が **14.5 秒**で出る。表示費用は「実 API なら $1.248」の想定額。
+
+### 決定事項（2026-08-30・菊池）
+- **配布形態**: この PC で `npm run app` で足りる。exe 化（electron-builder）は**しない**。
+- **写真入力欄**: 作らない。
+- **費用表示**: 工程別の経過秒・概算費用と合計を出してよい（モック時は「想定額・実課金なし」と併記）。
+- **効果音**: `assets/sfx/` をジョブ横断で使い回す（再生成しない）。
+- **BGM**: 現行の nolan 既定のまま（ジョブごとに ElevenLabs Music、キー未設定なら既存 / 合成音にフォールバック）。
+
+### 既知の制限
+- 「中止」は**工程の境目でしか効かない**（実行中の Veo 1 本や ffmpeg 1 本は最後まで走る）。
+- 生成は**同時 1 本**まで。ウィンドウを閉じると走行中の工程も一緒に落ちる。
+- 費用は `domain/pricing.mjs` の単価表による**推定**（ElevenLabs は $0 として扱う）。
+
 ## Phase 4 以降（候補）
 - 効果音（ElevenLabs SFX で whoosh / impact / braam を `assets/sfx/` に常備）、BGM（フリー素材配置 or ElevenLabs Music）
 - 写真入力による主役化（`images/edits` の Go/No-Go 検証）
