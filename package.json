@@ -2,14 +2,13 @@
   "name": "action-app",
   "version": "1.0.0",
   "description": "アクションをテーマにしたアプリ（社内AIハッカソン）。",
-  "main": "index.js",
-  "directories": {
-    "doc": "docs"
-  },
+  "main": "app/main.mjs",
   "scripts": {
     "test": "node --test \"test/**/*.test.mjs\"",
     "trailer": "node scripts/run.mjs",
-    "app": "electron app/main.mjs"
+    "app": "electron app/main.mjs",
+    "prepare:ffmpeg": "node tools/prepare-ffmpeg.mjs",
+    "dist": "electron-builder --win portable"
   },
   "repository": {
     "type": "git",
@@ -29,6 +28,44 @@
     "openai": "^7.8.0"
   },
   "devDependencies": {
-    "electron": "^44.0.0"
+    "electron": "^44.0.0",
+    "electron-builder": "26.15.3"
+  },
+  "build": {
+    "appId": "jp.co.iftc.action-app",
+    "productName": "action-app",
+    "directories": {
+      "output": "dist",
+      "buildResources": "build"
+    },
+    "files": [
+      "**/*",
+      "!out/**",
+      "!dist/**",
+      "!docs/**",
+      "!test/**",
+      "!tools/**",
+      "!scripts/**",
+      "!assets/**",
+      "!.claude/**",
+      "!.env",
+      "!.env.*",
+      "!*.md",
+      "!package-lock.json"
+    ],
+    "extraResources": [
+      { "from": "build/ffmpeg", "to": "ffmpeg", "filter": ["ffmpeg.exe", "ffprobe.exe"] },
+      { "from": "assets/refs", "to": "assets/refs", "filter": ["*.png"] },
+      { "from": "assets/sfx", "to": "assets/sfx", "filter": ["*.wav", "*.mp3"] },
+      { "from": "assets/bgm", "to": "assets/bgm", "filter": ["*.wav", "*.mp3"] }
+    ],
+    "win": {
+      "target": ["portable"]
+    },
+    "portable": {
+      "artifactName": "action-app-${version}-portable.exe"
+    },
+    "asar": true,
+    "compression": "normal"
   }
 }

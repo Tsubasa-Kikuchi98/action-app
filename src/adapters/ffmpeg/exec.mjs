@@ -1,5 +1,5 @@
 // ffmpeg / ffprobe の実行と計測（MediaTool ポートの実装）。
-// PATH → winget フォールバックの順に実行ファイルを解決する。
+// 同梱（exe 配布） → 環境変数 → PATH → winget の順に実行ファイルを解決する。
 import fs from "node:fs";
 import path from "node:path";
 import { spawn } from "node:child_process";
@@ -10,30 +10,94 @@ const WINGET_BIN = path.join(
   "Microsoft/WinGet/Packages/Gyan.FFmpeg_Microsoft.Winget.Source_8wekyb3d8bbwe/ffmpeg-9.0.1-full_build/bin"
 );
 
-/** PATH → winget フォールバックの順に実行ファイルを解決する。 */
-export function resolveBin(name) {
-  const exts = process.platform === "win32" ? [".exe", ".cmd", ".bat", ""] : [""];
-  for (const d of (process.env.PATH ?? "").split(path.delimiter).filter(Boolean)) {
-    for (const ext of exts) {
-      const f = path.join(d, name + ext);
-      try {
-        if (fs.existsSync(f) && fs.statSync(f).isFile()) return f;
-      } catch {
-        /* アクセスできない PATH 要素は無視 */
-      }
+const EXTS = process.platform === "win32" ? [".exe", ".cmd", ".bat", ""] : [""];
+
+/** dir の中に name(+拡張子) の実行ファイルがあればそのパスを返す。 */
+function inDir(dir, name) {
+  if (!dir) return null;
+  for (const ext of EXTS) {
+    const f = path.join(dir, name + ext);
+    try {
+      if (fs.existsSync(f) && fs.statSync(f).isFile()) return f;
+    } catch {
+      /* アクセスできないディレクトリは無視 */
     }
   }
-  for (const ext of exts) {
-    const f = path.join(WINGET_BIN, name + ext);
-    if (fs.existsSync(f)) return f;
+  return null;
+}
+
+/**
+ * 同梱パス（exe 配布時の resources/ffmpeg/）を返す。
+ * `process.resourcesPath` は Electron でパッケージ化したときだけ存在する。
+ */
+function bundledDir() {
+  const rp = process.resourcesPath;
+  if (!rp) return null;
+  const d = path.join(rp, "ffmpeg");
+  return fs.existsSync(d) ? d : null;
+}
+
+/** 環境変数による明示指定（ファイル指定でもディレクトリ指定でもよい）。 */
+function fromEnv(name) {
+  const vars = name === "ffprobe" ? ["FFPROBE_PATH", "FFMPEG_PATH", "FFMPEG_DIR"] : ["FFMPEG_PATH", "FFMPEG_DIR"];
+  for (const v of vars) {
+    const val = process.env[v];
+    if (!val) continue;
+    try {
+      const st = fs.statSync(val);
+      if (st.isFile()) {
+        // FFMPEG_PATH に ffmpeg.exe を指定した場合、ffprobe は同じフォルダから拾う
+        if (v === "FFPROBE_PATH" || (v === "FFMPEG_PATH" && name === "ffmpeg")) return val;
+        const sib = inDir(path.dirname(val), name);
+        if (sib) return sib;
+      } else if (st.isDirectory()) {
+        const f = inDir(val, name);
+        if (f) return f;
+      }
+    } catch {
+      /* 指定が無効なら次の候補へ */
+    }
   }
-  throw new Error(`${name} が見つかりません。PATH を通すか winget で ffmpeg を導入してください。`);
+  return null;
+}
+
+/**
+ * 実行ファイルを解決する。
+ *   ① 同梱（exe 配布の resources/ffmpeg/） → ② 環境変数（FFMPEG_PATH / FFPROBE_PATH / FFMPEG_DIR）
+ *   → ③ PATH → ④ winget の既定パス
+ */
+export function resolveBin(name) {
+  const bundled = inDir(bundledDir(), name);
+  if (bundled) return bundled;
+
+  const env = fromEnv(name);
+  if (env) return env;
+
+  for (const d of (process.env.PATH ?? "").split(path.delimiter).filter(Boolean)) {
+    const f = inDir(d, name);
+    if (f) return f;
+  }
+
+  const winget = inDir(WINGET_BIN, name);
+  if (winget) return winget;
+
+  throw new Error(
+    `${name} が見つかりません。PATH を通すか winget で ffmpeg を導入するか、FFMPEG_DIR を設定してください。`
+  );
 }
 
 let _ffmpeg = null;
 let _ffprobe = null;
-export const ffmpegPath = () => (_ffmpeg ??= resolveBin("ffmpeg"));
-export const ffprobePath = () => (_ffprobe ??= resolveBin("ffprobe"));
+
+/** 解決結果は起動時に 1 度だけログに出す（同梱を使えているかの確認用）。 */
+function resolveOnce(name) {
+  const p = resolveBin(name);
+  console.log(`[ffmpeg] ${name}: ${p}`);
+  return p;
+}
+
+export const ffmpegPath = () => (_ffmpeg ??= resolveOnce("ffmpeg"));
+export const ffprobePath = () => (_ffprobe ??= resolveOnce("ffprobe"));
 
 /** 子プロセスを実行して { code, stdout, stderr } を返す（shell は使わない）。 */
 export function run(bin, args, { cwd = ROOT, quiet = true } = {}) {

@@ -1,6 +1,8 @@
 node_modules/
+# electron-builder の出力（portable exe）
 dist/
-build/
+# 配布 exe に同梱する ffmpeg / ffprobe（npm run prepare:ffmpeg でコピーする。約 420MB）
+build/ffmpeg/
 .env
 .env.*
 *.log

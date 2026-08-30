@@ -11,6 +11,7 @@ import path from "node:path";
 import fs from "node:fs";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { app, BrowserWindow, ipcMain, protocol, net, shell, dialog } from "electron";
+import { bootstrapPaths, applyConfigEnv, configStatus, saveConfig } from "./paths.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 
@@ -20,8 +21,10 @@ protocol.registerSchemesAsPrivileged([
   { scheme: "media", privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true, bypassCSP: true } },
 ]);
 
-/** ROOT は pipeline 側（= src/adapters/storage/env.mjs）の解決結果に合わせる。 */
-let ROOT = path.resolve(HERE, "..");
+// ROOT（out/ と assets/ の置き場）は pipeline を import する前に確定させる。
+// 開発ならリポジトリルート、portable exe なら exe と同じフォルダ。
+const boot = bootstrapPaths();
+let ROOT = boot.root;
 let pipeline = null;
 
 /** パイプライン一式は .env の読み込みを伴うので、app.whenReady 後に遅延 import する。 */
@@ -29,6 +32,8 @@ async function loadPipeline() {
   if (!pipeline) {
     pipeline = await import("./pipeline.mjs");
     ROOT = pipeline.ROOT;
+    // .env（env.mjs の dotenv）が読まれた後に config.json を足す。.env が優先。
+    applyConfigEnv();
   }
   return pipeline;
 }
@@ -134,7 +139,21 @@ ipcMain.handle("app:defaults", async () => {
     steps: APP_STEPS,
     styles: ["nolan", "narration"],
     running: Boolean(running),
+    version: app.getVersion(),
+    packaged: app.isPackaged,
+    config: configStatus(),
   };
+});
+
+// ------------------------------------------------------------------ 設定（API キー）
+ipcMain.handle("app:config", () => configStatus());
+
+ipcMain.handle("app:config-save", (_e, values) => {
+  try {
+    return { ok: true, config: saveConfig(values ?? {}) };
+  } catch (e) {
+    return { ok: false, error: String(e?.message ?? e) };
+  }
 });
 
 ipcMain.handle("app:jobs", () => listJobs());

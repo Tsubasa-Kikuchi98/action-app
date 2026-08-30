@@ -21,6 +21,12 @@ contextBridge.exposeInMainWorld("trailer", {
   /** 以後の工程を止める。 */
   cancel: () => ipcRenderer.invoke("app:cancel"),
 
+  /** API キーの設定状態（値は末尾 4 文字だけ返る）。 */
+  config: () => ipcRenderer.invoke("app:config"),
+
+  /** API キーを保存する（userData/config.json。次の生成から有効）。 */
+  saveConfig: (values) => ipcRenderer.invoke("app:config-save", values),
+
   /** 工程イベントの購読。戻り値を呼ぶと解除。 */
   onEvent: (cb) => {
     const h = (_e, ev) => cb(ev);

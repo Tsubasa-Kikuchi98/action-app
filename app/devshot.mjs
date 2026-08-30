@@ -34,6 +34,35 @@ export function attach(win, dir) {
     try {
       await sleep(1200);
       console.log(`[devshot] window.trailer = ${await js(`typeof window.trailer`)}`);
+
+      // 設定画面（API キー）だけを確認するモード。生成は行わない。
+      if (process.env.TRAILER_SHOT_CONFIG) {
+        await shot("06-warn");
+        await js(`document.getElementById("openSettings").click(), true`);
+        await sleep(500);
+        await shot("07-settings");
+        await js(`(() => {
+          for (const [id, v] of Object.entries(${JSON.stringify(JSON.parse(process.env.TRAILER_SHOT_CONFIG_VALUES ?? "{}"))})) {
+            const i = document.getElementById("key-" + id);
+            if (!i) continue;
+            i.value = v;
+            i.dispatchEvent(new Event("input"));
+          }
+          document.getElementById("saveSettings").click();
+          return true;
+        })()`);
+        await sleep(800);
+        await shot("08-settings-saved");
+        await js(`document.getElementById("closeSettings").click(), true`);
+        await sleep(400);
+        await shot("09-warn-cleared");
+        const warn = await js(`document.getElementById("keyWarn").className`);
+        fs.writeFileSync(path.join(dir, "config-result.json"), JSON.stringify({ warnClass: warn }, null, 2), "utf8");
+        console.log(`[devshot] keyWarn=${warn}`);
+        if (process.env.TRAILER_SHOT_KEEP !== "1") setTimeout(() => app.quit(), 500);
+        return;
+      }
+
       await js(`(() => {
         const t = document.getElementById("episode");
         t.value = ${JSON.stringify(EPISODE)};
@@ -85,9 +114,16 @@ export function attach(win, dir) {
       await sleep(1500);
       await shot("05-history");
 
+      // ffmpeg の解決パス（同梱を使えているかの確認）をログ欄から拾う
+      const ffmpegLines = await js(
+        `(() => document.getElementById("log").textContent.split(String.fromCharCode(10))` +
+        `.filter((l) => l.startsWith("[ffmpeg]")))()`
+      );
+      console.log(`[devshot] ffmpeg=${JSON.stringify(ffmpegLines)}`);
+
       fs.writeFileSync(
         path.join(dir, "result.json"),
-        JSON.stringify({ status, video: played }, null, 2),
+        JSON.stringify({ status, video: played, ffmpeg: ffmpegLines }, null, 2),
         "utf8"
       );
     } catch (e) {

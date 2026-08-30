@@ -11,12 +11,19 @@ import { withRetry, sleep } from "../retry.mjs";
 
 const POLL_MS = 10_000;
 
+// クライアントはキーごとにキャッシュする（デスクトップアプリの設定画面で
+// キーを変えたとき、再起動なしで次の生成から反映されるようにするため）。
 let _genai = null;
+let _genaiKey = "";
 export function getGemini() {
-  if (!process.env.GEMINI_API_KEY) {
-    throw new Error("GEMINI_API_KEY が未設定です（.env を確認してください）");
+  const key = process.env.GEMINI_API_KEY;
+  if (!key) {
+    throw new Error("GEMINI_API_KEY が未設定です（.env または設定画面を確認してください）");
   }
-  _genai ??= new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+  if (!_genai || _genaiKey !== key) {
+    _genai = new GoogleGenAI({ apiKey: key });
+    _genaiKey = key;
+  }
   return _genai;
 }
 

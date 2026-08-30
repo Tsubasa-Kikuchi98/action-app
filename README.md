@@ -21,14 +21,63 @@
 | 効果音 | ElevenLabs Sound Generation（`POST /v1/sound-generation`）— `scripts/sfx.mjs` |
 | ナレーション・セリフ | OpenAI TTS（gpt-4o-mini-tts）— `scripts/narration.mjs` |
 
-## セットアップ
+## 使い方
+
+配布形態は 2 つあります。**他の PC で使うだけなら A**（Node も ffmpeg も要りません）。
+
+### A. exe で使う（推奨・配布用）
+
+1. `dist/action-app-<version>-portable.exe` を USB や共有フォルダで配り、**書き込めるフォルダ**
+   （デスクトップや `C:\work\action-app\` など。Program Files は避ける）にコピーする。
+2. ダブルクリックで起動する。初回だけ Windows SmartScreen が出るので「詳細情報 → 実行」。
+   （コード署名をしていないため。社内配布なので署名は取っていません）
+3. ヘッダの **「設定」** から API キーを入れて保存する。
+   - `OPENAI_API_KEY`（必須）… 台本・画像・ナレーション
+   - `GEMINI_API_KEY`（必須）… 動画生成（Veo）。「動画をスキップ」で生成するなら無くてもよい
+   - `ELEVENLABS_API_KEY`（任意）… BGM・効果音。未設定なら ffmpeg の合成音
+4. エピソード文を入れて「動画生成」。完成した mp4 は **exe と同じフォルダの `out/<ジョブ名>/trailer.mp4`**。
+
+exe には ffmpeg / ffprobe・基準画像（`assets/refs/`）・効果音（`assets/sfx/`）を同梱しており、
+初回起動時に `assets/` を exe の隣にコピーします。以後はそのフォルダのものを使うので、
+差し替えたいときは `assets/` の中身を置き換えてください。
+
+- 生成物と素材の置き場（ROOT）は **exe と同じフォルダ**。書き込めない場所に置いた場合だけ
+  `%APPDATA%\action-app\` にフォールバックします（ヘッダ右側に実際の ROOT が出ます）。
+- API キーは `%APPDATA%\action-app\config.json` に平文で保存します（社内利用のため）。
+  exe の隣に `.env` を置いた場合は **`.env` が優先**されます。
+- ffmpeg は「同梱 → 環境変数 `FFMPEG_DIR` / `FFMPEG_PATH` → PATH → winget」の順に探します。
+
+### B. ソースから使う（開発）
+
+```powershell
+.\scripts\setup.ps1     # Node/ffmpeg の確認 → winget で ffmpeg 導入 → npm i → .env 作成
+```
+
+手でやる場合:
 
 1. `.env.example` を `.env` にコピーし、`OPENAI_API_KEY` を設定（BGM・効果音を API 生成する場合は `ELEVENLABS_API_KEY` も。未設定でも ffmpeg の合成音にフォールバックして最後まで通ります）。
    全シーンを動画化する Phase 2 を使う場合は `GEMINI_API_KEY`（Google AI Studio で発行し、**課金を有効化**。Veo に無料枠はありません）も設定します。
 2. `npm install`。ffmpeg 9 は winget 等で導入（PATH になければ winget の既定パスを自動探索します）。
-3. 任意で `assets/bgm/` にフリー BGM を1曲置く（無ければ ffmpeg の合成音でプレースホルダを作ります）。
-4. 予告編を生成: `npm run trailer -- "締切前夜に全員で徹夜してリリースを間に合わせた話" demo1`
-5. 結果は `out/demo1/trailer.mp4`（1920x1080 / 30fps）。中間生成物は `out/demo1/` に残るので工程単位でやり直せます（`node scripts/images.mjs demo1 --force` 等）。
+3. **基準画像**（人物・ロケの一貫性用）はリポジトリに入っていないので、この PC で 1 度だけ作ります（約 $0.25）:
+   ```bash
+   node scripts/refs.mjs --chars --locs office,meeting,corridor
+   ```
+   → `assets/refs/char_*.png` と `assets/refs/loc_*.png`。**exe を配る場合はこれが同梱される**ので、
+   配布先の PC で作り直す必要はありません。
+4. 任意で `assets/bgm/` にフリー BGM を1曲置く（無ければ ffmpeg の合成音でプレースホルダを作ります）。
+5. 予告編を生成: `npm run trailer -- "締切前夜に全員で徹夜してリリースを間に合わせた話" demo1`
+6. 結果は `out/demo1/trailer.mp4`（1920x1080 / 30fps）。中間生成物は `out/demo1/` に残るので工程単位でやり直せます（`node scripts/images.mjs demo1 --force` 等）。
+
+### 配布用 exe を作る
+
+```bash
+npm run prepare:ffmpeg   # この PC の ffmpeg/ffprobe を build/ffmpeg/ にコピー（約 420MB・git 管理外）
+npm run dist             # → dist/action-app-1.0.0-portable.exe（約 227MB）
+```
+
+`electron-builder` の `portable` ターゲット（インストーラなしの単一 exe）です。
+同梱物は `build/ffmpeg/`・`assets/refs/`・`assets/sfx/`・`assets/bgm/`。
+`.env` と `out/` は **exe に含めません**（API キーが配布物に混ざらないようにするため）。
 
 ### 予告の型（style）
 
@@ -49,7 +98,7 @@ node scripts/sfx.mjs && node scripts/bgm.mjs myjob && node scripts/render.mjs my
 ## デスクトップアプリ（Phase 4）
 
 エピソード文をテキストボックスに入れて「動画生成」を押すだけで `out/<job>/trailer.mp4` まで作る
-Electron アプリ。社内発表のデモ用で、この PC で起動できれば十分（exe 化はしない）。
+Electron アプリ。開発時は `npm run app`、配布時は portable exe（上の「A. exe で使う」）。
 
 ```bash
 npm install                 # electron は devDependency

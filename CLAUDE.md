@@ -102,6 +102,9 @@ src/
     script|enrich|refs|images|narration|video|bgm|sfx|render|run.mjs
 scripts/                       互換エントリ（各 2 行。src/cli/*.mjs を呼ぶだけ）
   gen-image.mjs                単発の画像生成ツール（パイプライン外・従来どおり）
+  setup.ps1                    ソースからのセットアップ（Node/ffmpeg 確認 → npm i → .env 作成）
+tools/                         ビルド補助（layer 検査の対象外）
+  prepare-ffmpeg.mjs           配布 exe に同梱する ffmpeg/ffprobe を build/ffmpeg/ にコピー
 test/                          domain の純関数のユニットテスト（node --test / $0）
 ```
 
@@ -277,6 +280,7 @@ Veo は 3 本中 1 本が音声の安全フィルタで拒否（課金なし）�
 
 ```
 app/
+  paths.mjs           配布形態ごとの ROOT 解決（TRAILER_ROOT）・同梱素材のコピー・API キー（userData/config.json）
   main.mjs            Electron main（ESM）。ウィンドウ / IPC / media:// プロトコル。
                       パイプラインは子プロセスにせず main の中で直接呼ぶ（log.jsonl と中間生成物を CLI と同じに保つ）
   preload.cjs         contextBridge で window.trailer を公開（defaults / jobs / script / openFolder / generate / cancel / onEvent）
@@ -320,16 +324,59 @@ log.jsonl を読み直さずに費用の積算と Veo の「n/3 本完了」が�
 実測（mock / nolan）: 20.0 秒の trailer.mp4 が **14.5 秒**で出る。表示費用は「実 API なら $1.248」の想定額。
 
 ### 決定事項（2026-08-30・菊池）
-- **配布形態**: この PC で `npm run app` で足りる。exe 化（electron-builder）は**しない**。
+- **配布形態**: 当初は「この PC で `npm run app` で足りる」としたが、**2026-08-31 に方針変更**し
+  portable exe を作るようにした（下の「配布（portable exe）」）。
 - **写真入力欄**: 作らない。
 - **費用表示**: 工程別の経過秒・概算費用と合計を出してよい（モック時は「想定額・実課金なし」と併記）。
 - **効果音**: `assets/sfx/` をジョブ横断で使い回す（再生成しない）。
 - **BGM**: 現行の nolan 既定のまま（ジョブごとに ElevenLabs Music、キー未設定なら既存 / 合成音にフォールバック）。
 
+### 配布（portable exe。**2026-08-31 に方針変更**）
+
+「他の PC でも使えるようにする」ため、**Node も ffmpeg も無い Windows PC で exe 1 つ＋API キー入力だけで動く**
+形にした。`npm run prepare:ffmpeg && npm run dist` → `dist/action-app-<version>-portable.exe`（約 227MB）。
+
+| 項目 | 決定 |
+|---|---|
+| ターゲット | electron-builder 26.15.3 の **`portable`**（インストーラなしの単一 exe）。`nsis` は作らない |
+| 同梱物（`extraResources`） | `build/ffmpeg/{ffmpeg,ffprobe}.exe`（`npm run prepare:ffmpeg` が winget の実体からコピー・git 管理外）、`assets/refs/*.png`、`assets/sfx/*.wav`、`assets/bgm/*` |
+| asar | **有効**（`app.asar` 36MB）。ESM の main（`app/main.mjs`）も Electron 44 なら asar の中から普通に読める。`asarUnpack` は不要だった |
+| exe に**入れない**もの | `.env`・`out/`・`docs/`・`test/`・`tools/`・`scripts/`・`assets/`（assets は extraResources 側で入る）。**API キーが配布物に混ざらないようにするのが目的** |
+
+#### パス解決（ここだけは慎重に）
+- `src/adapters/storage/env.mjs` の `ROOT` が **`TRAILER_ROOT` を見る**ようになった（未設定＝従来どおりリポジトリルート）。
+  `.env` も cwd 依存をやめ、**ROOT → リポジトリルート**の順に探す。
+- Electron の `app/paths.mjs` が **`pipeline.mjs` を import する前に** ROOT を決めて `TRAILER_ROOT` に入れる。
+  - 開発（`npm run app`）: リポジトリルート
+  - portable exe: **`PORTABLE_EXECUTABLE_DIR`（= exe と同じフォルダ）**。portable は起動のたびに
+    一時フォルダへ展開されるので `process.execPath` では**なく**この環境変数を使う
+  - そこに書けないとき（Program Files 等）: `app.getPath("userData")`
+- 初回起動時に同梱の `resources/assets/` から `ROOT/assets/` へ**足りないファイルだけ**コピーする。
+- `resolveBin`（`src/adapters/ffmpeg/exec.mjs`）の探索順を
+  **① 同梱（`process.resourcesPath/ffmpeg/`）→ ② `FFMPEG_PATH` / `FFPROBE_PATH` / `FFMPEG_DIR` → ③ PATH → ④ winget** に拡張。
+  解決結果は `[ffmpeg] ffmpeg: <path>` として 1 度だけログに出す（アプリのログ欄にも出る）。
+
+#### API キーの設定画面
+- ヘッダの「設定」→ モーダルで `OPENAI_API_KEY` / `GEMINI_API_KEY` / `ELEVENLABS_API_KEY` を入力。
+  保存先は **`app.getPath("userData")/config.json`（= `%APPDATA%\action-app\config.json`）に平文**（社内利用のため）。
+- 読み込み順は **`.env` → config.json**（dotenv が入れた値は上書きしない＝`.env` が優先）。
+  `applyConfigEnv()` は `pipeline.mjs` を import した**後**に呼ぶ（dotenv より先に入れると優先順が逆になる）。
+- 保存すると `process.env` にも即反映し、**再起動なしで次の生成から有効**。そのため
+  `getOpenAI()` / `getGemini()` のクライアントキャッシュを**キーごと**に持つようにした（キーが変わったら作り直す）。
+- 必須キー（OpenAI / Gemini）が未設定なら画面上部に黄色い警告バーを出す。ElevenLabs は任意。
+
+#### ソースからのセットアップ
+`scripts/setup.ps1`（Node 確認 → ffmpeg 無ければ winget 導入 → `npm i` → `.env` を `.env.example` から作成 → 次の手順表示）。
+配布先の PC に `assets/refs/` は無いので、ソース運用では `node scripts/refs.mjs --chars --locs office,meeting,corridor`（約 $0.25）で作る。
+exe を配る場合はビルド PC の `assets/refs/` が同梱されるので不要。
+
 ### 既知の制限
 - 「中止」は**工程の境目でしか効かない**（実行中の Veo 1 本や ffmpeg 1 本は最後まで走る）。
 - 生成は**同時 1 本**まで。ウィンドウを閉じると走行中の工程も一緒に落ちる。
 - 費用は `domain/pricing.mjs` の単価表による**推定**（ElevenLabs は $0 として扱う）。
+- exe は**コード署名していない**ので、初回起動時に Windows SmartScreen の警告が出る（「詳細情報 → 実行」）。
+- exe は約 227MB（ffmpeg / ffprobe の同梱で 420MB → 圧縮後）。portable なので起動のたびに一時フォルダへ展開する。
+- exe を **書き込めないフォルダ**（Program Files 等）に置くと `out/` が `%APPDATA%\action-app\` に出る。
 
 ## Phase 4 以降（候補）
 - 効果音（ElevenLabs SFX で whoosh / impact / braam を `assets/sfx/` に常備）、BGM（フリー素材配置 or ElevenLabs Music）

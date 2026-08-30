@@ -14,9 +14,16 @@
       <h1>action-app <span class="sub">予告編ジェネレーター</span></h1>
       <span id="mockBadge" class="badge hidden">MOCK モード（API を呼びません）</span>
       <span id="rootPath" class="root"></span>
+      <button id="openSettings" class="ghost">設定</button>
     </header>
 
     <main>
+      <!-- ------------------------------------------------ API キー未設定の警告 -->
+      <div id="keyWarn" class="warn-bar hidden">
+        <span id="keyWarnText"></span>
+        <button id="warnSettings" class="link">設定を開く</button>
+      </div>
+
       <!-- ------------------------------------------------ 入力 -->
       <section class="card" id="inputCard">
         <h2>エピソード</h2>
@@ -91,6 +98,23 @@
         <ul id="jobs" class="jobs"></ul>
       </section>
     </main>
+
+    <!-- ------------------------------------------------ 設定（API キー） -->
+    <div id="settingsBack" class="modal-back hidden">
+      <div class="modal" role="dialog" aria-modal="true" aria-labelledby="settingsTitle">
+        <h2 id="settingsTitle">設定 — API キー</h2>
+        <p class="hint">
+          この PC だけに平文で保存します（<span id="configPath" class="mono"></span>）。
+          <code>.env</code> があればそちらが優先されます。保存すると次の生成から有効です。
+        </p>
+        <div id="keyFields"></div>
+        <div class="row actions">
+          <button id="saveSettings" class="primary">保存</button>
+          <button id="closeSettings">閉じる</button>
+          <span id="settingsStatus" class="status"></span>
+        </div>
+      </div>
+    </div>
 
     <script src="app.js"></script>
   </body>

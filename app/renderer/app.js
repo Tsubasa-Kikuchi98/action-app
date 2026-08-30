@@ -13,6 +13,10 @@ const el = {
   scriptBox: $("scriptBox"), scriptJson: $("scriptJson"),
   jobs: $("jobs"), reloadJobs: $("reloadJobs"), mockCostNote: $("mockCostNote"),
   mockBadge: $("mockBadge"), rootPath: $("rootPath"),
+  openSettings: $("openSettings"), warnSettings: $("warnSettings"),
+  settingsBack: $("settingsBack"), keyFields: $("keyFields"), configPath: $("configPath"),
+  saveSettings: $("saveSettings"), closeSettings: $("closeSettings"), settingsStatus: $("settingsStatus"),
+  keyWarn: $("keyWarn"), keyWarnText: $("keyWarnText"),
 };
 
 const STATE_LABEL = {
@@ -171,6 +175,76 @@ async function generate() {
   }
 }
 
+// ------------------------------------------------------------------ 設定
+// API キーは main（userData/config.json）が持つ。ここは表示と入力だけで、
+// 値そのものは末尾 4 文字しか受け取らない。
+function renderConfig(cfg) {
+  el.configPath.textContent = cfg.file;
+  el.keyFields.innerHTML = "";
+  for (const k of cfg.keys) {
+    const div = document.createElement("div");
+    div.className = "keyfield";
+    div.innerHTML =
+      `<label></label>` +
+      `<input type="password" spellcheck="false" autocomplete="off" />` +
+      `<div class="note"></div>`;
+    const label = div.querySelector("label");
+    label.textContent = k.label;
+    const tag = document.createElement("span");
+    tag.className = k.required ? "req" : "opt";
+    tag.textContent = k.required ? "必須" : "任意";
+    label.appendChild(tag);
+
+    const input = div.querySelector("input");
+    input.id = `key-${k.key}`;
+    input.placeholder = k.set ? `設定済み ${k.masked}（変更するときだけ入力）` : "未設定";
+    input.classList.toggle("filled", k.set);
+    input.addEventListener("input", () => { input.dataset.dirty = "1"; });
+
+    const note = div.querySelector(".note");
+    note.textContent = k.note + (k.source === "env" ? "  ／ .env から読み込み済み（.env が優先）" : "");
+    el.keyFields.appendChild(div);
+  }
+  // 必須キーの不足を画面上部に出す
+  const missing = cfg.keys.filter((k) => k.required && !k.set).map((k) => k.label);
+  el.keyWarn.classList.toggle("hidden", missing.length === 0);
+  if (missing.length) {
+    el.keyWarnText.textContent = `API キーが未設定です: ${missing.join(" / ")}。このままだと生成に失敗します。`;
+  }
+}
+
+async function reloadConfig() {
+  renderConfig(await window.trailer.config());
+}
+
+function openSettings() {
+  el.settingsStatus.textContent = "";
+  el.settingsStatus.className = "status";
+  el.settingsBack.classList.remove("hidden");
+  reloadConfig();
+}
+
+async function saveSettings() {
+  const values = {};
+  for (const input of el.keyFields.querySelectorAll("input")) {
+    if (input.dataset.dirty === "1") values[input.id.replace(/^key-/, "")] = input.value;
+  }
+  if (!Object.keys(values).length) {
+    el.settingsStatus.textContent = "変更はありません。";
+    el.settingsStatus.className = "status";
+    return;
+  }
+  const r = await window.trailer.saveConfig(values);
+  if (!r.ok) {
+    el.settingsStatus.textContent = r.error;
+    el.settingsStatus.className = "status err";
+    return;
+  }
+  renderConfig(r.config);
+  el.settingsStatus.textContent = "保存しました（次の生成から有効です）。";
+  el.settingsStatus.className = "status";
+}
+
 // ------------------------------------------------------------------ イベント
 window.trailer.onEvent((ev) => {
   switch (ev.type) {
@@ -235,6 +309,16 @@ el.stop.addEventListener("click", () => {
   el.status.textContent = "中止を要求しました（実行中の工程が終わり次第止まります）…";
 });
 el.reloadJobs.addEventListener("click", loadJobs);
+el.openSettings.addEventListener("click", openSettings);
+el.warnSettings.addEventListener("click", openSettings);
+el.saveSettings.addEventListener("click", saveSettings);
+el.closeSettings.addEventListener("click", () => el.settingsBack.classList.add("hidden"));
+el.settingsBack.addEventListener("click", (e) => {
+  if (e.target === el.settingsBack) el.settingsBack.classList.add("hidden");
+});
+window.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && !el.settingsBack.classList.contains("hidden")) el.settingsBack.classList.add("hidden");
+});
 el.openFolder.addEventListener("click", async () => {
   const r = await window.trailer.openFolder(currentJob);
   if (!r.ok) el.status.textContent = r.error;
@@ -265,6 +349,7 @@ window.addEventListener("error", (e) => {
   el.job.value = d.job;
   el.rootPath.textContent = d.root;
   el.mockBadge.classList.toggle("hidden", !d.mock);
+  if (d.config) renderConfig(d.config);
   el.mockCostNote.classList.toggle("hidden", !d.mock);
   el.style.innerHTML = "";
   renderSteps();
