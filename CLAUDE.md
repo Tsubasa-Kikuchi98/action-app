@@ -23,8 +23,8 @@
 | 動画生成（Phase 2） | Google Gemini API **Veo 3.1 Lite** `veo-3.1-lite-generate-preview` / 720p / image-to-video / 4・6・8 秒 | $0.05/秒、無料枠なし。音声は常に同梱（環境音として採用、`no dialogue, no speech` をプロンプトに固定）。生成 11秒〜最大6分・非同期ポーリング。生成物はサーバ保持2日 → 即DL。失敗時はそのシーンだけ静止画 Ken Burns にフォールバック。品質向上時は `veo-3.1-fast-generate-preview` にモデル名差し替え |
 | ナレーション | OpenAI `gpt-4o-mini-tts` / voice `cedar` / `response_format: "wav"` / `speed` 1.0 | `instructions` は openai.fm 公式のラベル形式。共通ブロック ＋ scene_type 別ブロック。生成後に前後の無音を自動トリム |
 | セリフ（Phase 3） | 同 TTS。ナレとは別 voice（`ash` / `onyx` / `nova` / `shimmer`）で `out/<job>/dlg/sN.wav` | 台本の `dialogue`（予告全体で 2〜3 本）。render で小部屋の残響を付けて「現場の声」にする |
-| BGM | ElevenLabs Music API（`force_instrumental: true`）。未契約時はフリー素材を `assets/bgm/` に置いて使う | Music API は有料契約者限定 |
-| 効果音 | Phase 2 では作らない（Veo 同梱音声で代替）。Phase 3 で ElevenLabs SFX（編集点の whoosh/impact/braam）を再検討 | — |
+| BGM | ElevenLabs Music API `POST /v1/music`（`model_id: music_v2` / `force_instrumental: true` / `music_length_ms`） | nolan は **ElevenLabs 優先**（20 秒・「ticking clock, low brass, rising tension」）。それ以外は `assets/bgm/` → ElevenLabs → ffmpeg 合成音の順。キー未設定でも必ず合成音で通る |
+| 効果音 | ElevenLabs Sound Generation `POST /v1/sound-generation`（`text` / `duration_seconds` / `prompt_influence`） | `assets/sfx/braam.wav` / `braam2.wav` / `riser.wav` を**ジョブ横断で 1 度だけ**生成し使い回す（`node scripts/sfx.mjs`）。nolan のカード開始時刻に鳴らす。キー未設定時は ffmpeg 合成ブラーム（55Hz の減衰＋ノイズのアタック）にフォールバック |
 | 合成 | ffmpeg 9.0.1（winget 導入済み） | シーン別レンダ → 最終 xfade 合成。動画クリップは 1080p に拡大、Veo 音声は環境音レーンとしてダッキング |
 | 実装言語 | Node 22（ESM, `.mjs`）。ffmpeg の filter_complex 生成も Node で行う | 追加パッケージは最小限（`openai` / `@google/genai` / `dotenv`）。構成はクリーンアーキテクチャ（`src/domain` ← `src/usecases` ← `src/adapters` ← `src/cli`） |
 
@@ -57,9 +57,12 @@ src/
       refsPrompt.mjs           ⓪ 基準画像プロンプト（キャラシート / ロケプレート）
       videoPrompt.mjs          ③ Veo の motion-first プロンプトと生成秒数の決定
       ttsInstructions.mjs      ③' TTS の演技指示と話者→声の対応
+      sfxPrompts.mjs           ⑥ 効果音（ブラーム 2 種＋riser）と BGM のプロンプト
     timeline/
       constants.mjs            解像度 / fps / カード尺 / 音量 / ズーム / カット上限（env で調整）
       plan.mjs                 ⑤ の頭脳: カット割り・カード配置・音イベント・ASS イベント・xfade
+      planNolan.mjs            ⑤ nolan 専用の設計（カード↔カット交互・分割なし・SFX イベント）
+      voice.mjs                クリップの発話区間の推定と切り出し位置（nolan の srcIn）
       ass.mjs                  ASS の文字列生成（スタイル定義とイベント整形）
       filters.mjs              filter_complex の文字列生成（カット / 最終合成 / ルック / 音チェーン）
   usecases/                    工程のオーケストレーション。ポート（引数の deps）にだけ依存
@@ -69,7 +72,8 @@ src/
     generateImages.mjs         ② シーン画像
     generateNarration.mjs      ③' ナレ・セリフ・button
     generateVideos.mjs         ③ Veo（--stills / --dry-run / 予算ガード）
-    prepareBgm.mjs             ④ BGM（assets → ElevenLabs → 合成音）
+    prepareBgm.mjs             ④ BGM（nolan は ElevenLabs 優先 / それ以外は assets → ElevenLabs → 合成音）
+    prepareSfx.mjs             ⑥ 効果音（assets/sfx/ にジョブ横断で 1 度だけ作る）
     renderTrailer.mjs          ⑤ 実測 → planTimeline → ASS → カット別レンダ → 最終合成
     runPipeline.mjs            ①〜⑤ の一気通貫とサマリ表示
     pool.mjs                   同時実行数を絞るワーカープール
@@ -80,6 +84,9 @@ src/
              image.mjs         images/generations と images/edits
              tts.mjs           gpt-4o-mini-tts
     gemini/  veo.mjs           generateVideos + ポーリング + 即ダウンロード
+    elevenlabs/ client.mjs     xi-api-key と detail.message のエラー整形・課金ヘッダの抽出
+                sfx.mjs        POST /v1/sound-generation
+                music.mjs      POST /v1/music
     ffmpeg/  exec.mjs          resolveBin / run / ffmpeg / probe*（PATH → winget）
              filters.mjs       fc.txt の書き出しと ffmpeg 実行（カット / 最終合成）
              ass.mjs           telop.ass の書き出し
@@ -90,7 +97,7 @@ src/
   cli/                         引数解析と usecases 呼び出しだけ
     args.mjs                   共通 parseArgs（--force / --dry-run / --stills / --style= …）
     deps.mjs                   createDeps()（composition root。adapters をポートに束ねる）
-    script|enrich|refs|images|narration|video|bgm|render|run.mjs
+    script|enrich|refs|images|narration|video|bgm|sfx|render|run.mjs
 scripts/                       互換エントリ（各 2 行。src/cli/*.mjs を呼ぶだけ）
   gen-image.mjs                単発の画像生成ツール（パイプライン外・従来どおり）
 test/                          domain の純関数のユニットテスト（node --test / $0）
@@ -109,6 +116,7 @@ test/                          domain の純関数のユニットテスト（nod
 ### 出力・中間生成物（従来どおり）
 ```
 assets/bgm/        フォールバック用フリーBGM
+assets/sfx/        効果音（braam / braam2 / riser。ジョブ横断で使い回す。git 管理外）
 assets/refs/       基準画像（キャラシート / ロケプレート。git 管理外）
 out/<job>/         script.json / img / vid / nar / dlg / cuts / telop.ass / fc.txt / trailer.mp4 / log.jsonl
 docs/              企画・調査資料
@@ -124,11 +132,12 @@ buildVideoPrompt）と、層の依存の向きを検査する。演出を触っ�
 
 - `OPENAI_API_KEY`（必須）
 - `GEMINI_API_KEY`（Phase 2 動画生成。Google AI Studio で発行＋課金有効化）
-- `ELEVENLABS_API_KEY`（BGM を API で作る場合のみ）
+- `ELEVENLABS_API_KEY`（**BGM と効果音**。未設定でも ffmpeg 合成音にフォールバックして最後まで通る）
 - `REFS_QUALITY`（基準画像の quality。既定 **medium**）、`REFS_SIZE`（既定 1536x1024）
 - `TTS_SPEED`（既定 **1.0**）、`TTS_VOICE`（既定 cedar）、`TTS_TRIM`（既定 on）、`IMG_QUALITY`（既定 low）、`IMG_SIZE`（既定 1536x1024）
 - Phase 3 の演出調整: `AMBIENT_VOL`（既定 **0.9**）、`AMBIENT_TARGET_DB`（既定 -20）、`DLG_VOL` / `BTN_VOL`、`BGM_VOL`、`XFADE_SEC`、`LETTERBOX`、`PRESENTS_SEC` / `REVIEW_SEC` / `INTER_SEC` / `STOPDOWN_SEC` / `TITLE_SEC` / `BUTTON_MIN` / `BUTTON_MAX` / `SILENT_TELOP_SEC`、`VEO_GEN_SEC`（既定 8）
-- 台本の型: `TRAILER_STYLE`（`narration` 既定 / `dialogue`。`node scripts/script.mjs ... --style=dialogue` でも指定可）、`NAR_TOTAL_MAX`（既定 80）
+- 台本の型: `TRAILER_STYLE`（`narration` 既定 / `dialogue` / **`nolan`**。`node scripts/script.mjs ... --style=nolan` でも指定可）、`NAR_TOTAL_MAX`（既定 80）
+- nolan の調整: `NOLAN_PRESENTS_SEC`（1.4）/ `NOLAN_CARD_SEC`（1.6）/ `NOLAN_STOPDOWN_SEC`（0.4）/ `NOLAN_TITLE_SEC`（3.0）/ `NOLAN_END_SEC`（2.0）/ `NOLAN_BGM_VOL`（0.26）/ `NOLAN_BGM_SEC`（20）/ `NOLAN_PRESENTS`（「IFTC 提供」）/ `SFX_VOL`（0.85）/ `SFX_LEAD`（0）/ `FONTNAME_NOLAN`（Yu Gothic）/ `FONTNAME_NOLAN_TITLE`（Yu Gothic Light）
 
 ## ffmpeg / Windows の注意（実機で確認済み・必ず守る）
 
@@ -140,6 +149,8 @@ buildVideoPrompt）と、層の依存の向きを検査する。演出を触っ�
 - `amix=...:normalize=0`、`loudnorm` の後に `aresample=48000`。ナレーションを sidechaincompress に使うときは `asplit` で分岐。
 - MCP 登録は PowerShell から、`--scope user` か `--scope project` を明示（Git Bash は不可）。
 - （Phase 3 実装で判明）`ass` フィルタに `fontsdir=C\:/Windows/Fonts` は渡せない（`No option name near '/Windows/Fonts'` = `\:` エスケープが効かない）→ 指定しなければ fontconfig が `Yu Gothic` を解決する。`xfade` の 2 入力は**両方に** `settb=AVTB,fps=30,format=yuv420p,setsar=1` を掛ける（片方が `concat`・片方が単一クリップだと timebase が 1/30 と 1/1000000 で食い違い失敗する）。ASS の drawing 座標は「文字ボックスの左端 + 座標」で描かれるので、罫線は `\an7` ＋ `\pos(左端,y)` ＋ 0 起点の座標で置く。
+- （nolan 実装で判明・2026-08-30）**libass は Spacing を「最後の 1 文字の後ろ」にも足す**ので、`\an5` ＋ `\pos(960,y)` で置くと字間の半分だけ左にずれる。中央に置きたいときは x に `Spacing/2` を足す（`nolanCenterX()`）。
+- （nolan 実装で判明・2026-08-30）fontconfig は Windows の游ゴシックを**ウェイト別の名前でも解決できる**: `Yu Gothic`（Regular）/ `Yu Gothic Medium` / `Yu Gothic Light` / `Noto Sans JP` はいずれも別の字形でレンダリングされる（存在しない名前を渡した場合と描画結果が違うことで確認）。nolan のカードは `Yu Gothic`（Bold を切る）、タイトルだけ `Yu Gothic Light`。
 - （Phase 3 調査で判明）`blend` は `format=gbrp` で行い後で `yuv420p` に戻す（YUV のままだとマゼンタ化）。動画入力に `zoompan` を使うときは `fps=30` を**前**に置く（24fps 入力が縮む）。`crop` の w/h に `t` は使えない（x/y は可）。`asubboost` は約 10 LU 下がるので低域は `bass=` で。重い `curves` は AI 映像の暗部を潰す。`ass` フィルタ（libass）が使え、テロップは `ass=f=out/<job>/telop.ass` で字間・フェード・スケールを一括制御できる。`minterpolate` は使わない（遅く破綻しやすい）。
 
 ## Phase 1 — 最小プロトタイプ（**クローズ 2026-08-29**）
@@ -211,6 +222,48 @@ buildVideoPrompt）と、層の依存の向きを検査する。演出を触っ�
 - [x] イテレーション 1 完了、菊池の採点待ち（`out/demo3/trailer.mp4` 35.7 秒 / 14 カット / セリフ 3 本 / −13.7 LUFS）
 - [ ] 各イテレーションの 5 軸採点と変更点を docs/trailer-app-plan.md に記録
 - [ ] 全軸 4 以上 → Phase 3 クローズ
+
+## 予告の型（style）— nolan プリセット（**追加 2026-08-30**）
+
+菊池が本物のアクション映画 CM と見比べて決めた 3 つ目の型。既存の 5 シーン構成（`narration` / `dialogue`）は**そのまま残す**。
+
+```
+node scripts/script.mjs "<エピソード文>" <job> --style=nolan   # または TRAILER_STYLE=nolan
+node scripts/images.mjs <job> && node scripts/video.mjs <job>
+node scripts/sfx.mjs && node scripts/bgm.mjs <job> && node scripts/render.mjs <job> --force
+```
+
+### 構成（合計 20.0 秒 / **ナレーションなし** / カット内の文字は一切なし）
+| 秒 | 要素 | 中身 |
+|---|---|---|
+| 0.0-1.4 | 提供カード | 「IFTC 提供」（黒地・白・字間広め。文言はコード側で固定） |
+| 1.4-4.4 | **カット 1**（3 秒 / discover） | **先輩**が失敗に気づく。先輩のセリフ一言 |
+| 4.4-6.0 | 中間カード① | 短い断言 ＋ **ブラーム（braam）** |
+| 6.0-10.0 | **カット 2**（4 秒 / struggle） | **主人公**が対処するがうまくいかず、もがく。主人公のセリフ一言 |
+| 10.0-11.6 | 中間カード② | 短い断言 ＋ **ブラーム（braam2）** |
+| 11.6-14.6 | **カット 3**（3 秒 / mobilize） | **上司**が動き出す。上司のセリフ一言。解決は見せない |
+| 14.6-15.0 | 無音の黒 | 全レーン無音（stopdown） |
+| 15.0-18.0 | タイトルカード | 大きな白文字 1 行（Yu Gothic Light / 112px / 字間 40）＋ 極小タグライン ＋ **riser** |
+| 18.0-20.0 | エンドカード | `release_line`（近日公開 等） |
+
+### 設計判断
+- **scene_type は新設 3 種**（`discover` / `struggle` / `mobilize`）。既存 5 種を流用すると「冒頭は平和 → 発覚」の構成指示と混ざるため。話者・尺・既定カメラはこの 3 種に紐づけて固定する（先輩 3 秒 / 主人公 4 秒 / 上司 3 秒）。
+- **セリフは Veo に口パク付きで生成させる**（TTS では作らない）。`The <役割> says in Japanese: "…"` を Veo プロンプトの最後に置き、他は無言と明示する。`generateNarration` は nolan では何も生成しない。
+- **8 秒生成 → 3〜4 秒使用**だが、頭から切るとセリフの途中で切れる（Veo は 2〜4 秒あたりで喋り出す）。`probeLevels`（声の帯域 250〜3400Hz を 0.4 秒窓で RMS）→ `detectVoiceSpan`（**最初の**まとまった発話を採る。後半のより大きい物音に引かれない）→ `pickSrcIn`（余裕があれば発話を窓の中央に置く）で切り出し位置を決める。
+- **カードとカットの往復だけ**。カットは分割せず（`cut_count` は必ず 1）、疑似寄り・手ブレ・スロー・白フラッシュ・xfade は一切使わない。
+- **ルックは style で差し替える**（`lookFilter(..., style)`）。nolan は teal-orange グレードとブルームを外し、`colorbalance` で影を青に寄せた `eq=contrast=1.12:saturation=0.80` ＋ 微量グレイン ＋ 弱いビネット ＋ レターボックス。
+- **SFX レーン**を追加（`plan.sfx[] { name, at, file }`）。最終合成の入力順は `[カット][ナレ][セリフ][button][SFX][BGM]`。SFX はダッキングしない。
+
+### 台本の縛り（`normalize` / `lintScript` が機械的に強制する）
+- シーンはちょうど 3 枚・`scene_type` は discover / struggle / mobilize の順
+- `narration` は全シーン空、`dialogue` は全シーン必須（4〜10 字）、話者は先輩 → 主人公 → 上司で固定
+- `telop` / `screen_text` は空、`cut_count` は 1、`duration_sec` は 3 / 4 / 3
+- `interstitials` はちょうど 2 枚（`after_scene` 1, 2）。文言は**時間・不可逆・引き返せなさ**の語彙（「気づいた時には、遅かった。」「時間は、待たない。」）
+- `presents` は「IFTC 提供」固定。`review_line` / `stake` / `button_line` / `cast_lines` は空（COMING SOON とキャスト行も出さない）
+
+### 実測（out/lambda-nolan / 2026-08-30）
+20.00 秒 / 3 カット / 6 カード / −15.0 LUFS / 1本 $1.36（台本 $0.029 + 画像 3 枚 medium $0.126 + Veo 3×8 秒 $1.20 + ElevenLabs 37 クレジット）。
+Veo は 3 本中 1 本が音声の安全フィルタで拒否（課金なし）→ `ambient` から `distant thunder` を外して再投入で成功。
 
 ## Phase 4 以降（候補）
 - 効果音（ElevenLabs SFX で whoosh / impact / braam を `assets/sfx/` に常備）、BGM（フリー素材配置 or ElevenLabs Music）

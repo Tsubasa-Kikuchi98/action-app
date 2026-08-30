@@ -17,17 +17,34 @@
 | コーディング | Claude Code |
 | イラスト生成 | OpenAI 画像生成 API（gpt-image-2）— `scripts/gen-image.mjs` |
 | 動画生成 | Google Gemini API — Veo 3.1 Lite（image-to-video、720p）— `scripts/video.mjs` |
-| BGM・効果音 | ElevenLabs（公式 MCP） |
+| BGM | ElevenLabs Music API（`POST /v1/music`）— `scripts/bgm.mjs` |
+| 効果音 | ElevenLabs Sound Generation（`POST /v1/sound-generation`）— `scripts/sfx.mjs` |
 | ナレーション・セリフ | OpenAI TTS（gpt-4o-mini-tts）— `scripts/narration.mjs` |
 
 ## セットアップ
 
-1. `.env.example` を `.env` にコピーし、`OPENAI_API_KEY` を設定（BGM を API 生成する場合は `ELEVENLABS_API_KEY` も）。
+1. `.env.example` を `.env` にコピーし、`OPENAI_API_KEY` を設定（BGM・効果音を API 生成する場合は `ELEVENLABS_API_KEY` も。未設定でも ffmpeg の合成音にフォールバックして最後まで通ります）。
    全シーンを動画化する Phase 2 を使う場合は `GEMINI_API_KEY`（Google AI Studio で発行し、**課金を有効化**。Veo に無料枠はありません）も設定します。
 2. `npm install`。ffmpeg 9 は winget 等で導入（PATH になければ winget の既定パスを自動探索します）。
 3. 任意で `assets/bgm/` にフリー BGM を1曲置く（無ければ ffmpeg の合成音でプレースホルダを作ります）。
 4. 予告編を生成: `npm run trailer -- "締切前夜に全員で徹夜してリリースを間に合わせた話" demo1`
 5. 結果は `out/demo1/trailer.mp4`（1920x1080 / 30fps）。中間生成物は `out/demo1/` に残るので工程単位でやり直せます（`node scripts/images.mjs demo1 --force` 等）。
+
+### 予告の型（style）
+
+`--style=<型>`（または `TRAILER_STYLE`）で構成を切り替えます。
+
+| style | 尺 | 声 | 文字 |
+|---|---|---|---|
+| `narration`（既定） | 約 29 秒 / 5 シーン | ナレ ＋ セリフ（TTS） | テロップ ＋ カード |
+| `dialogue` | 約 30 秒 / 5 シーン | セリフ主導（TTS） | 文字カード主導 |
+| `nolan` | **20 秒 / 3 カット** | **ナレなし。セリフは Veo が口パクで喋る** | **カードだけ**（カット内は文字ゼロ） |
+
+```bash
+node scripts/script.mjs "<エピソード文>" myjob --style=nolan
+node scripts/images.mjs myjob && node scripts/video.mjs myjob
+node scripts/sfx.mjs && node scripts/bgm.mjs myjob && node scripts/render.mjs myjob --force
+```
 
 ## コード構成（クリーンアーキテクチャ）
 
@@ -38,10 +55,11 @@
 src/
   domain/     外部依存ゼロ。台本の型・正規化・lint、固定キャスト、各種プロンプト（文字列）、
               タイムライン設計（カット割り・xfade オフセット・ASS・filter_complex の生成）、単価表
-  usecases/   工程のオーケストレーション（台本 / 演出 / 基準画像 / 画像 / ナレ / 動画 / BGM / 合成 / 一気通貫）。
+  usecases/   工程のオーケストレーション（台本 / 演出 / 基準画像 / 画像 / ナレ / 動画 / BGM / 効果音 / 合成 / 一気通貫）。
               ポート（引数で渡す依存）にだけ依存する
   adapters/   ポートの実装。openai（text / image / tts）、gemini（veo）、
-              ffmpeg（exec / filters / ass）、storage（jobStore / files / refsStore / env）
+              ffmpeg（exec / filters / ass）、elevenlabs（sfx / music）、
+              storage（jobStore / files / refsStore / env）
   cli/        引数解析（args.mjs）と依存の組み立て（deps.mjs の createDeps()）だけ
 scripts/      互換エントリ（各 2 行）。gen-image.mjs だけはパイプライン外の単発ツール
 test/         domain の純関数のユニットテスト
