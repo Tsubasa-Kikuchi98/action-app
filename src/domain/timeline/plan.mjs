@@ -255,7 +255,7 @@ export function planTimeline(view, src) {
     const e = push({ kind: "card", color: "black", outSec: END_CARD_SEC });
     ass.push({
       style: "EndCard", start: e.absStart + 0.05, end: e.absStart + e.outSec,
-      tags: `{\pos(960,540)\fad(250,300)\blur0.8\fscx103\fscy103\t(0,600,\fscx100\fscy100)}`, text: endText,
+      tags: `{\\pos(960,540)\\fad(250,300)\\blur0.8\\fscx103\\fscy103\\t(0,600,\\fscx100\\fscy100)}`, text: endText,
     });
   }
 
