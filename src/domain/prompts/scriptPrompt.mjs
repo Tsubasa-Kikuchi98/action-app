@@ -152,7 +152,8 @@ export const SCRIPT_SCHEMA = {
             description:
               "登場人物の**英語**の決め台詞。3〜8 語（40 文字以内）。無い場合は空文字。turn / montage / resolve のいずれかに置く。" +
               "役割は 1 拒絶（turn の頭）2 号砲（montage の頭）3 息継ぎ（montage 後半の軽口）。説明台詞は禁止。" +
-              "話者の役割に合う自然な口語英語にする（例: senpai \"It's still running.\" / hero \"I can't stop it.\" / boss \"I'll make the call.\"）。日本語は書かない。",
+              "話者の役割に合う自然な口語英語にする（先輩なら It's still running. / 主人公なら I can't stop it. / 上司なら I'll make the call.）。" +
+              "**セリフ本文だけを返す**（話者名・引用符・カギ括弧は付けない）。日本語は書かない。",
           },
           speaker: { type: "string", enum: SPEAKERS, description: "dialogue の話者。hero=主人公（若手男性）/ senpai=先輩（30代前半女性）/ boss=上司（50代男性）。dialogue が空なら none。" },
           characters: {
@@ -207,8 +208,8 @@ export const NOLAN_SCRIPT_SCHEMA = (() => {
   S.dialogue.description =
     "そのシーンの人物が声に出して言う**英語**の一言。**3〜8 語（40 文字以内）。全 3 シーンで必須**。" +
     "動画 AI が口パク付きで喋らせるので、短く言い切る形にする" +
-    "（例: senpai \"It's still running.\" / hero \"I can't stop it.\" / boss \"I'll make the call.\"）。" +
-    "説明台詞は禁止。日本語は書かない。";
+    "（先輩なら It's still running. / 主人公なら I can't stop it. / 上司なら I'll make the call.）。" +
+    "**セリフ本文だけを返す**（話者名・引用符・カギ括弧は付けない）。説明台詞は禁止。日本語は書かない。";
   S.speaker.description = "s1=senpai（先輩）/ s2=hero（主人公）/ s3=boss（上司）で固定。";
   S.scene_type.description = `nolan は ${NOLAN_SCENE_TYPES.join(" → ")} の順で固定（s1=discover / s2=struggle / s3=mobilize）。`;
   S.duration_sec.description = "s1=3 / s2=4 / s3=3 で固定（コード側でも固定される）。";
@@ -316,7 +317,8 @@ ${structureBlock(style)}
 
 # セリフ（dialogue）— **英語で書く**
 - **登場人物は欧米系**。セリフは**すべて英語**にする（日本語は 1 文字も混ぜない）。ナレ・テロップ・カードは従来どおり日本語。
-- 1 本 **3〜8 語**（40 文字以内）の短い一言。手本: 先輩 "It's still running." / 主人公 "I can't stop it." / 上司 "I'll make the call."
+- 1 本 **3〜8 語**（40 文字以内）の短い一言。手本: 先輩なら It's still running. / 主人公なら I can't stop it. / 上司なら I'll make the call.
+- **dialogue には セリフ本文だけ**を入れる。話者名も引用符も付けない（話者は speaker で返す）。
 - 説明台詞・スラング・感嘆符は使わない。ピリオドで言い切る。
 
 # 尺とカット割り（duration_sec / cut_count）
@@ -403,9 +405,9 @@ ${NOLAN_STRUCTURE}
 - **口元が見える構図にする**（正面〜斜め 45 度）。動画 AI にセリフを口パクで喋らせるので、顔が小さすぎたり後ろ姿だったりすると成立しない。
 
 # 3 つのカット（役割は入れ替えない）
-1. **discover（3 秒・先輩）** — 先輩が失敗に気づく瞬間。画面を見た姿勢のまま固まる、勢いよく立ち上がる。セリフは気づきの一言（例: "It's still running."）
-2. **struggle（4 秒・主人公）** — 主人公が自分で何とかしようとして、うまくいかない。キーを連打する、端末を叩き閉じる、頭を抱えて立ち上がる。**まだ誰も助けに来ていない**。セリフは焦りの一言（例: "I can't stop it."）
-3. **mobilize（3 秒・上司）** — 上司が動き出す。扉を押し開けて歩き出す、受話器に手を伸ばす、フロアを見渡して指示を出す。**結果は絶対に見せない**（謝罪が通った・請求が消えた・全員が安堵する、は禁止）。セリフは指示・宣言の一言（例: "I'll make the call."）
+1. **discover（3 秒・先輩）** — 先輩が失敗に気づく瞬間。画面を見た姿勢のまま固まる、勢いよく立ち上がる。セリフは気づきの一言（例: It's still running.）
+2. **struggle（4 秒・主人公）** — 主人公が自分で何とかしようとして、うまくいかない。キーを連打する、端末を叩き閉じる、頭を抱えて立ち上がる。**まだ誰も助けに来ていない**。セリフは焦りの一言（例: I can't stop it.）
+3. **mobilize（3 秒・上司）** — 上司が動き出す。扉を押し開けて歩き出す、受話器に手を伸ばす、フロアを見渡して指示を出す。**結果は絶対に見せない**（謝罪が通った・請求が消えた・全員が安堵する、は禁止）。セリフは指示・宣言の一言（例: I'll make the call.）
 
 # カードの文言（interstitials・**この予告で最も重要な言葉**）
 - 日本語 8〜14 字の短い断言を 2 枚。**時間・不可逆・引き返せなさ**の語彙で書く。
@@ -416,8 +418,9 @@ ${NOLAN_STRUCTURE}
 # セリフ（dialogue）— **英語で書く**
 - **登場人物は欧米系**。セリフは**すべて英語**にする（日本語は 1 文字も混ぜない）。カード・タイトル・タグラインは従来どおり日本語。
 - **3 本すべて必須**。各 **3〜8 語**（40 文字以内）。動画 AI が口パク付きで喋るので、短く言い切る。
-- 話者の役割に合う自然な口語英語にする。手本: 先輩 "It's still running." / 主人公 "I can't stop it." / 上司 "I'll make the call."
-- 説明台詞は禁止（"The Lambda loop has not stopped yet." は不可 → "It's still running."）。
+- 話者の役割に合う自然な口語英語にする。手本: 先輩なら It's still running. / 主人公なら I can't stop it. / 上司なら I'll make the call.
+- **dialogue には セリフ本文だけ**を入れる。話者名（senpai / hero / boss）も引用符もカギ括弧も付けない。話者は speaker で返す。
+- 説明台詞は禁止（The Lambda loop has not stopped yet. は不可 → It's still running.）。
 - 全員最後まで真顔。スラング・冗談・感嘆符は使わない。ピリオドで言い切る。
 
 # タイトル（title / tagline）

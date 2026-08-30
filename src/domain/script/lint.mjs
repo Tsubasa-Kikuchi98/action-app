@@ -19,6 +19,7 @@ function lintDialogue(s) {
     return [`s${s.index}: セリフ「${d}」が ${w} 語（${DIALOGUE_MIN_WORDS}〜${DIALOGUE_MAX_WORDS} 語）`];
   }
   if (d.length > DIALOGUE_MAX_CHARS) return [`s${s.index}: セリフ「${d}」が ${d.length} 文字（${DIALOGUE_MAX_CHARS} 文字以内）`];
+  if (/["“”「」]/.test(d)) return [`s${s.index}: セリフ「${d}」に引用符が残っています（本文だけを入れる）`];
   return [];
 }
 

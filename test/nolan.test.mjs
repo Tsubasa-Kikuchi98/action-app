@@ -1,7 +1,7 @@
 // nolan プリセット（3 カット・ナレなし・カード主導）のユニットテスト。API は呼ばない。
 import test from "node:test";
 import assert from "node:assert/strict";
-import { normalize } from "../src/domain/script/normalize.mjs";
+import { normalize, cleanDialogue } from "../src/domain/script/normalize.mjs";
 import { lintScript } from "../src/domain/script/lint.mjs";
 import { enrichedView } from "../src/domain/script/index.mjs";
 import { NOLAN_SCENE_TYPES, sceneCountFor, STYLES } from "../src/domain/script/constants.mjs";
@@ -162,6 +162,20 @@ test("lintScript(nolan): 日本語のセリフ・語数オーバーを検出す�
   const w = lintScript(d);
   assert.ok(w.some((x) => x.includes("日本語が混ざっています")), w.join(" / "));
   assert.ok(w.some((x) => x.includes("語（2〜8 語）")), w.join(" / "));
+});
+
+test("normalize: セリフから話者ラベルと引用符を落とす", () => {
+  const raw = rawNolan();
+  raw.scenes[0].dialogue = 'senpai "The loop is still running."';
+  raw.scenes[1].dialogue = "hero: 'I can not stop it.'";
+  raw.scenes[2].dialogue = "「I'll make the call.」";
+  const d = normalize(raw, "エピソード", "nolan", opts);
+  assert.deepEqual(d.scenes.map((s) => s.dialogue), [
+    "The loop is still running.", "I can not stop it.", "I'll make the call.",
+  ]);
+  assert.deepEqual(lintScript(d), []);
+  // 本文が話者名で始まるだけのセリフは壊さない
+  assert.equal(cleanDialogue("Boss, look at this."), "Boss, look at this.");
 });
 
 test("キャストは欧米系で、外見は髪と服装で見分ける", () => {

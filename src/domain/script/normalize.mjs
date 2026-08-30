@@ -12,6 +12,19 @@ import { CAST, SPEAKERS, LEGACY_SPEAKER, LOCATION_KEYS, defaultLocation } from "
 /** 改行を潰して 1 行にする。 */
 export const oneLine = (v) => String(v ?? "").replace(/[\r\n]+/g, " ").trim();
 
+/**
+ * セリフの整形。モデルがプロンプトの手本ごと `senpai "It's still running."` の形で返すことがあるので、
+ * 先頭の話者ラベルと、全体を囲む引用符・カギ括弧を落として本文だけにする。
+ * （話者は speaker フィールドで持つ。引用符は Veo が「発話」と解釈する目印なので本文には残さない）
+ */
+export function cleanDialogue(v) {
+  let t = oneLine(v);
+  // 引用符が続くときだけ話者ラベルを剥がす（`Boss, look at this` のような本文は壊さない）
+  t = t.replace(/^(?:hero|senpai|boss)\s*[:：]?\s*(?=["'“‘「])/i, "");
+  const m = /^["'“‘「]([\s\S]*)["'”’」]$/.exec(t.trim());
+  return (m ? m[1] : t).trim();
+}
+
 /** nolan の提供カードは固定文言（env NOLAN_PRESENTS で上書き可）。 */
 export const NOLAN_PRESENTS = process.env.NOLAN_PRESENTS ?? "IFTC 提供";
 
@@ -50,7 +63,7 @@ export function normalize(data, episode, style = DEFAULT_STYLE, opts = {}) {
 
   data.scenes = data.scenes.map((s, i) => {
     const type = SCENE_TYPES.includes(s.scene_type) ? s.scene_type : guessSceneType(i, n);
-    const rawDlg = oneLine(s.dialogue);
+    const rawDlg = cleanDialogue(s.dialogue);
     // セリフは英語（3〜8 語）。日本語の「字数」ではなく文字数の上限だけで切る。
     const dialogue = rawDlg && allowed.has(type) && kept < dlgMax ? (kept++, rawDlg.slice(0, DIALOGUE_MAX_CHARS)) : "";
     // 声はシーンごとに一方だけ: turn / montage はセリフ優先、それ以外はナレ優先
@@ -143,7 +156,7 @@ function normalizeNolan(data, episode, { model, createdAt, sceneCount, warn }) {
     const type = NOLAN_SCENE_TYPES[i] ?? NOLAN_SCENE_TYPES[NOLAN_SCENE_TYPES.length - 1];
     const speaker = NOLAN_SPEAKER_BY_TYPE[type];
     // セリフは英語 3〜8 語。長すぎるものは切る（Veo の 3〜4 秒に収める）
-    const dialogue = oneLine(s.dialogue).slice(0, DIALOGUE_MAX_CHARS);
+    const dialogue = cleanDialogue(s.dialogue).slice(0, DIALOGUE_MAX_CHARS);
     // その場面に映るのは基本その 1 人（モデルが足していれば最大 3 人まで許す）
     const chars = (Array.isArray(s.characters) ? s.characters : []).filter((c) => CAST[c]);
     const characters = chars.includes(speaker) ? chars.slice(0, 3) : [speaker, ...chars].slice(0, 3);
