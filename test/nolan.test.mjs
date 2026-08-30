@@ -16,6 +16,7 @@ import { buildScriptSchema, buildScriptSystemPrompt, validateSchema } from "../s
 import { buildVideoPrompt } from "../src/domain/prompts/videoPrompt.mjs";
 import { buildEditPrompt, NOLAN_STYLE_SUFFIX } from "../src/domain/prompts/imagePrompt.mjs";
 import { SFX_SPECS, musicSpec } from "../src/domain/prompts/sfxPrompts.mjs";
+import { CAST, LOCATIONS, castDescription } from "../src/domain/cast.mjs";
 
 const opts = { model: "test-model", createdAt: "2026-01-01T00:00:00.000Z", warn: () => {} };
 
@@ -49,7 +50,7 @@ const rawNolan = (over = {}) => ({
       motion_beat: "stands up sharply",
       camera_beat: "locked-off symmetrical wide shot",
       ambient: "server fans",
-      dialogue: "止まってない",
+      dialogue: "It's still running.",
       speaker: "hero",               // → senpai にされるはず
       characters: [],
       telop_timing: "on_silence",
@@ -60,7 +61,7 @@ const rawNolan = (over = {}) => ({
       duration_sec: 4, scene_type: "turn", location: "office", cut_count: 2,
       visual_metaphor: "復旧できない → 端末を叩き閉じる",
       motion_beat: "slams the laptop shut", camera_beat: "very slow dolly in",
-      ambient: "keyboard, fans", dialogue: "戻せない", speaker: "hero",
+      ambient: "keyboard, fans", dialogue: "I can't stop it.", speaker: "hero",
       characters: ["hero"], telop_timing: "cut_head",
     },
     {
@@ -69,7 +70,7 @@ const rawNolan = (over = {}) => ({
       duration_sec: 4, scene_type: "resolve", location: "corridor", cut_count: 3,
       visual_metaphor: "本部長を呼ぶ → 逆光の廊下を歩き出す",
       motion_beat: "strides through the door", camera_beat: "locked-off low-angle wide shot",
-      ambient: "corridor hum", dialogue: "私が話す", speaker: "boss",
+      ambient: "corridor hum", dialogue: "I'll make the call.", speaker: "boss",
       characters: ["boss"], telop_timing: "cut_head",
     },
   ],
@@ -88,7 +89,7 @@ test("normalize(nolan): ナレは全シーン空・セリフは全シーン必�
   assert.equal(d.style, "nolan");
   assert.equal(d.scenes.length, 3);
   assert.deepEqual(d.scenes.map((s) => s.narration), ["", "", ""]);
-  assert.deepEqual(d.scenes.map((s) => s.dialogue), ["止まってない", "戻せない", "私が話す"]);
+  assert.deepEqual(d.scenes.map((s) => s.dialogue), ["It's still running.", "I can't stop it.", "I'll make the call."]);
   assert.deepEqual(d.scenes.map((s) => s.speaker), ["senpai", "hero", "boss"]);
   assert.deepEqual(d.scenes.map((s) => s.scene_type), NOLAN_SCENE_TYPES);
 });
@@ -152,6 +153,24 @@ test("lintScript(nolan): セリフ欠落・カード欠落・禁句を検出す�
   assert.ok(w.some((x) => x.includes("セリフがありません")), w.join(" / "));
   assert.ok(w.some((x) => x.includes("中間カードが 1 枚")), w.join(" / "));
   assert.ok(w.some((x) => x.includes("禁句")), w.join(" / "));
+});
+
+test("lintScript(nolan): 日本語のセリフ・語数オーバーを検出する", () => {
+  const d = normalize(rawNolan(), "エピソード", "nolan", opts);
+  d.scenes[0].dialogue = "止まってない";
+  d.scenes[1].dialogue = "I really do not think that we can stop it now";
+  const w = lintScript(d);
+  assert.ok(w.some((x) => x.includes("日本語が混ざっています")), w.join(" / "));
+  assert.ok(w.some((x) => x.includes("語（2〜8 語）")), w.join(" / "));
+});
+
+test("キャストは欧米系で、外見は髪と服装で見分ける", () => {
+  for (const k of ["hero", "senpai", "boss"]) {
+    assert.ok(CAST[k].en.includes("Western"), `${k}: ${CAST[k].en}`);
+    assert.ok(!/Japanese/.test(CAST[k].en), `${k} に Japanese が残っている`);
+  }
+  assert.ok(castDescription(["hero", "boss"]).includes("light brown short hair"));
+  assert.ok(!/Japanese/.test(LOCATIONS.office.en));
 });
 
 test("lintScript(nolan): カット内の文字とナレを検出する", () => {
@@ -287,21 +306,23 @@ test("nolan のスキーマとシステムプロンプト", () => {
   assert.ok(p.includes("パロディの原理"), "共通の原理は共有する");
   assert.ok(p.includes("舞台（location）"), "舞台の指示も共有する");
   assert.ok(!p.includes("案 A: ナレーション主導"));
+  assert.ok(p.includes("セリフは**すべて英語**"), "セリフは英語で書かせる");
+  assert.ok(schema.properties.scenes.items.properties.dialogue.description.includes("英語"));
 });
 
 test("buildVideoPrompt(nolan): 口パクのセリフ行と静かなカメラの指定が入る", () => {
   const scene = {
     scene_type: "mobilize", camera_beat: "locked-off low-angle wide shot",
     motion_beat: "strides through the door", ambient: "corridor hum",
-    dialogue: "私が話す", speaker: "boss", characters: ["boss"], video_prompt: "", image_prompt: "",
+    dialogue: "I'll make the call.", speaker: "boss", characters: ["boss"], video_prompt: "", image_prompt: "",
   };
   const p = buildVideoPrompt(scene, "nolan");
-  assert.ok(p.includes('says in Japanese: "私が話す"'));
+  assert.ok(p.includes(`says in English: "I'll make the call."`));
   assert.ok(p.includes("mouth is clearly visible"));
   assert.ok(p.includes("No handheld shake, no zoom"));
   // 既定 style ではこれまでどおりの文面
   const q = buildVideoPrompt(scene);
-  assert.ok(q.includes('speaks one short line in Japanese: "私が話す"'));
+  assert.ok(q.includes(`speaks one short line in English: "I'll make the call."`));
   assert.ok(!q.includes("No handheld shake"));
 });
 

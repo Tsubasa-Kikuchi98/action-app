@@ -73,7 +73,7 @@ Pacing: Fast. One breath, one line, then stop.
 
 ${intensity}
 
-Pronunciation: Natural spoken Japanese, slightly rough at the edges.
+Pronunciation: Natural spoken English, slightly rough at the edges.
 
 Punctuation: End hard. No trailing softness.`;
 }

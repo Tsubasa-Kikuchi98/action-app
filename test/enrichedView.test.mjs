@@ -57,14 +57,14 @@ test("enriched=true の台本は演出フィールドをそのまま通す", () 
   data.cast_lines = ["主演 情シス", "", "  "];
   data.scenes[3].cut_count = 6;
   data.scenes[3].scene_type = "montage";
-  data.scenes[3].dialogue = "全員、動け";
+  data.scenes[3].dialogue = "Everyone, move.";
   data.scenes[3].screen_text = ["02:14 AM", "ALERT", "余分"];
 
   const v = enrichedView(data);
   assert.equal(v.enriched, true);
   assert.equal(v.stake, "残された時間は 3 分");
   assert.equal(v.scenes[3].cut_count, 6, "montage は 6 まで許される");
-  assert.equal(v.scenes[3].dialogue, "全員、動け");
+  assert.equal(v.scenes[3].dialogue, "Everyone, move.");
   assert.deepEqual(v.scenes[3].screen_text, ["02:14 AM", "ALERT"], "画面内テロップは 2 個まで");
   assert.deepEqual(v.cast_lines, ["主演 情シス"], "空文字は落とす");
   assert.deepEqual(v.interstitials, [{ text: "この夏、", after_scene: 2 }]);

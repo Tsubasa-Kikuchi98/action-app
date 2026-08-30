@@ -1,6 +1,26 @@
 // 台本を読んで「原理を外していないか」を警告する純関数（削除・書き換えはしない）。
 // 課金せずに何度でも回せるので、生成直後に必ず通す。
-import { NAR_TOTAL_MAX, NOLAN_SCENE_TYPES, NOLAN_SPEAKER_BY_TYPE, findForbidden } from "./constants.mjs";
+import {
+  NAR_TOTAL_MAX, NOLAN_SCENE_TYPES, NOLAN_SPEAKER_BY_TYPE, findForbidden,
+  DIALOGUE_MAX_CHARS, DIALOGUE_MIN_WORDS, DIALOGUE_MAX_WORDS, countWords, hasJapanese,
+} from "./constants.mjs";
+
+/**
+ * セリフ 1 本を検査する（登場人物は欧米系なのでセリフは英語）。
+ * @param {{index: number, dialogue: string}} s
+ * @returns {string[]}
+ */
+function lintDialogue(s) {
+  const d = s.dialogue;
+  if (!d) return [];
+  if (hasJapanese(d)) return [`s${s.index}: セリフ「${d}」に日本語が混ざっています（セリフは英語）`];
+  const w = countWords(d);
+  if (w < DIALOGUE_MIN_WORDS || w > DIALOGUE_MAX_WORDS) {
+    return [`s${s.index}: セリフ「${d}」が ${w} 語（${DIALOGUE_MIN_WORDS}〜${DIALOGUE_MAX_WORDS} 語）`];
+  }
+  if (d.length > DIALOGUE_MAX_CHARS) return [`s${s.index}: セリフ「${d}」が ${d.length} 文字（${DIALOGUE_MAX_CHARS} 文字以内）`];
+  return [];
+}
 
 /**
  * @param {object} data 正規化済みの台本
@@ -29,6 +49,8 @@ export function lintScript(data) {
   if (noMeta.length) warns.push(`visual_metaphor が空: ${noMeta.join(", ")}`);
   const noArrow = data.scenes.filter((s) => s.visual_metaphor && !/[→>]/.test(s.visual_metaphor)).map((s) => `s${s.index}`);
   if (noArrow.length) warns.push(`visual_metaphor が「現実 → 演出」の形になっていない: ${noArrow.join(", ")}`);
+
+  warns.push(...data.scenes.flatMap(lintDialogue));
 
   const dlg = data.scenes.filter((s) => s.dialogue).length;
   const wantDlg = data.style === "dialogue" ? 4 : 3;
@@ -74,7 +96,7 @@ function lintNolan(data) {
     if (s.narration) warns.push(`s${s.index}: nolan にナレーションは入れません`);
     if (s.telop || (s.screen_text ?? []).length) warns.push(`s${s.index}: カット内に文字を出しません（telop / screen_text は空）`);
     if (!s.dialogue) warns.push(`s${s.index}: セリフがありません（全 3 シーン必須）`);
-    else if (s.dialogue.length < 4 || s.dialogue.length > 10) warns.push(`s${s.index}: セリフ「${s.dialogue}」が ${s.dialogue.length} 字（4〜10 字）`);
+    else warns.push(...lintDialogue(s));
     const want = NOLAN_SPEAKER_BY_TYPE[s.scene_type];
     if (s.dialogue && want && s.speaker !== want) warns.push(`s${s.index}: 話者が ${s.speaker}（${s.scene_type} は ${want}）`);
     if (!s.visual_metaphor) warns.push(`s${s.index}: visual_metaphor が空`);

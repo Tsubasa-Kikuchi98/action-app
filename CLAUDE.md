@@ -28,6 +28,8 @@
 | 合成 | ffmpeg 9.0.1（winget 導入済み） | シーン別レンダ → 最終 xfade 合成。動画クリップは 1080p に拡大、Veo 音声は環境音レーンとしてダッキング |
 | 実装言語 | Node 22（ESM, `.mjs`）。ffmpeg の filter_complex 生成も Node で行う | 追加パッケージは最小限（`openai` / `@google/genai` / `dotenv`）。構成はクリーンアーキテクチャ（`src/domain` ← `src/usecases` ← `src/adapters` ← `src/cli`） |
 
+**キャストは欧米系（Western）・セリフは英語**（2026-08-30。日本語セリフの違和感対策。テロップ・カード・タイトル・エンドカードの文字とナレーションは日本語のまま。外見は `src/domain/cast.mjs` の `CAST[].en`）。
+
 Anthropic API は使わない（Claude Code サブスクに API は含まれない）。
 
 ## ディレクトリ構成（クリーンアーキテクチャ）
@@ -217,6 +219,7 @@ buildVideoPrompt）と、層の依存の向きを検査する。演出を触っ�
 - [ ] 実際に Veo を再生成する（5 シーン × 8 秒 = $2.00。`node scripts/video.mjs demo3 --force`）
 - [x] 起点画像のプロンプト改善 → demo4 で実施（石板崩落／赤灯の保管庫／金庫室／夜の街の部隊／逆再生の破片）
 - [x] **基準画像（リファレンス）による人物・ロケの一貫性**（2026-08-30）: `scripts/refs.mjs` を追加し `assets/refs/` にキャラシート 3 枚＋ロケプレート 3 枚を生成（$0.252）。台本に `location`（enum）を追加し、`images.mjs` を `images/edits` に切り替え。lambda の 5 枚で顔・服・部屋がほぼ完全に一致（$0.21）
+- [x] **キャストを欧米系・セリフを英語に切り替え**（2026-08-30）: 日本語セリフの違和感対策。`cast.mjs` の `en` を Western に、台本スキーマ／プロンプトの dialogue を英語 3〜8 語に、Veo は `says in English:`。lint は日本語混入と語数を warn（画面の文字は日本語のまま）
 - [ ] Lite で 1〜2 本比較 → 不足なら Fast を 1 本（要確認）
 #### E. 評価
 - [x] イテレーション 1 完了、菊池の採点待ち（`out/demo3/trailer.mp4` 35.7 秒 / 14 カット / セリフ 3 本 / −13.7 LUFS）

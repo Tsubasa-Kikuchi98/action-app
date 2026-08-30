@@ -4,6 +4,7 @@ import {
   SCENE_TYPES, TELOP_TIMINGS, STYLES, DEFAULT_STYLE, SCENE_COUNT,
   DURATION_RAMP, DEFAULT_CUT_COUNT, DEFAULT_CAMERA_BEAT,
   NOLAN_SCENE_TYPES, NOLAN_SPEAKER_BY_TYPE, NOLAN_DURATION, NOLAN_SCENE_COUNT,
+  DIALOGUE_MAX_CHARS,
   guessSceneType, cutCap, maxDialogue, sceneCountFor,
 } from "./constants.mjs";
 import { CAST, SPEAKERS, LEGACY_SPEAKER, LOCATION_KEYS, defaultLocation } from "../cast.mjs";
@@ -50,7 +51,8 @@ export function normalize(data, episode, style = DEFAULT_STYLE, opts = {}) {
   data.scenes = data.scenes.map((s, i) => {
     const type = SCENE_TYPES.includes(s.scene_type) ? s.scene_type : guessSceneType(i, n);
     const rawDlg = oneLine(s.dialogue);
-    const dialogue = rawDlg && allowed.has(type) && kept < dlgMax ? (kept++, rawDlg.slice(0, 20)) : "";
+    // セリフは英語（3〜8 語）。日本語の「字数」ではなく文字数の上限だけで切る。
+    const dialogue = rawDlg && allowed.has(type) && kept < dlgMax ? (kept++, rawDlg.slice(0, DIALOGUE_MAX_CHARS)) : "";
     // 声はシーンごとに一方だけ: turn / montage はセリフ優先、それ以外はナレ優先
     const voiceScene = ["turn", "montage"].includes(type);
     const narrationText = voiceScene && dialogue ? "" : String(s.narration ?? "").trim();
@@ -124,7 +126,7 @@ export function normalize(data, episode, style = DEFAULT_STYLE, opts = {}) {
  * 構成は固定なので、モデルの自由度をここで潰して必ず同じ形にする:
  *   - シーンはちょうど 3 枚（discover / struggle / mobilize の順）
  *   - **ナレーションは全シーン空**（声は Veo が口パクで喋るセリフだけ）
- *   - **セリフは全シーン必須**。話者はシーン種別で固定（先輩 → 主人公 → 上司）
+ *   - **セリフは全シーン必須**（英語・3〜8 語）。話者はシーン種別で固定（先輩 → 主人公 → 上司）
  *   - **カット内の文字は一切なし**（telop / screen_text は空、cut_count は 1）
  *   - 中間カードはちょうど 2 枚（after_scene 1 / 2）
  *   - presents は固定文言、cast_lines / review_line / stake / button_line は空
@@ -140,8 +142,8 @@ function normalizeNolan(data, episode, { model, createdAt, sceneCount, warn }) {
   data.scenes = data.scenes.map((s, i) => {
     const type = NOLAN_SCENE_TYPES[i] ?? NOLAN_SCENE_TYPES[NOLAN_SCENE_TYPES.length - 1];
     const speaker = NOLAN_SPEAKER_BY_TYPE[type];
-    // セリフは 4〜10 字。長すぎるものは切る（Veo の 3〜4 秒に収める）
-    const dialogue = oneLine(s.dialogue).slice(0, 12);
+    // セリフは英語 3〜8 語。長すぎるものは切る（Veo の 3〜4 秒に収める）
+    const dialogue = oneLine(s.dialogue).slice(0, DIALOGUE_MAX_CHARS);
     // その場面に映るのは基本その 1 人（モデルが足していれば最大 3 人まで許す）
     const chars = (Array.isArray(s.characters) ? s.characters : []).filter((c) => CAST[c]);
     const characters = chars.includes(speaker) ? chars.slice(0, 3) : [speaker, ...chars].slice(0, 3);

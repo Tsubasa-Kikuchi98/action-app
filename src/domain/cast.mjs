@@ -1,14 +1,16 @@
 // 固定キャストと固定ロケーション（domain）。
 // 外部依存なし。台本プロンプト・画像プロンプト・基準画像・Veo プロンプトが共有する。
 //
-// 固定キャスト（2026-08-30 決定）。声を持つのはこの 3 人だけ。それ以外の登場人物は無言。
+// 固定キャスト（2026-08-30 決定 / 2026-08-30 更新）。声を持つのはこの 3 人だけ。それ以外の登場人物は無言。
+// 日本語のセリフに違和感が出たため、**登場人物は欧米系・セリフは英語**に切り替えた。
+// 見分けは人種ではなく髪と服装で付ける（Veo / gpt-image-2 が安定して再現できる特徴）。
 export const CAST = {
   hero:   { jp: "主人公（若手の男性社員）", role: "失敗をする当事者。前に出て動く",
-            en: "the protagonist: a Japanese man in his mid-20s, short black hair, white shirt with sleeves rolled up, no tie, lanyard ID card" },
+            en: "the protagonist: a Western man in his mid-20s, light brown short hair, white shirt with sleeves rolled up, no tie, lanyard ID card" },
   senpai: { jp: "先輩（30 代前半の女性社員）", role: "失敗に最初に気づく。冷静に状況を掴む",
-            en: "the senior colleague: a Japanese woman in her early 30s, shoulder-length dark hair tied back, dark navy blazer over a light blouse" },
+            en: "the senior colleague: a Western woman in her early 30s, dark blonde shoulder-length hair tied back, navy blazer over a light blouse" },
   boss:   { jp: "上司（50 代の男性社員）", role: "責任を負い、指示を出し、外部へ連絡する",
-            en: "the boss: a Japanese man in his 50s, gray-streaked hair, dark suit, no glasses, calm heavy presence" },
+            en: "the boss: a Western man in his 50s, gray hair, dark suit, no glasses, calm heavy presence" },
 };
 export const SPEAKERS = ["none", "hero", "senpai", "boss"];
 
@@ -18,7 +20,7 @@ export const SPEAKERS = ["none", "hero", "senpai", "boss"];
 export const LOCATIONS = {
   office: {
     jp: "オープンオフィス",
-    en: "a modern Japanese open-plan office: rows of desks with dual monitors, glass partitions, an exposed ceiling with linear light strips, cool teal-blue ambient light, floor-to-ceiling windows showing a night city skyline",
+    en: "a modern open-plan office: rows of desks with dual monitors, glass partitions, an exposed ceiling with linear light strips, cool teal-blue ambient light, floor-to-ceiling windows showing a night city skyline",
   },
   meeting: {
     jp: "会議室",
@@ -34,7 +36,7 @@ export const LOCATIONS = {
   },
   home: {
     jp: "自宅（暗い寝室・机）",
-    en: "a small dark Japanese bedroom at night: an unmade bed, a low desk with a laptop and a charging phone, curtains half open with rain on the window, only a faint blue glow lighting the room",
+    en: "a small dark bedroom at night: an unmade bed, a low desk with a laptop and a charging phone, curtains half open with rain on the window, only a faint blue glow lighting the room",
   },
 };
 export const LOCATION_KEYS = Object.keys(LOCATIONS);

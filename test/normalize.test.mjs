@@ -38,18 +38,18 @@ const run = (data, style = "narration") => normalize(data, "エピソード", st
 // cold_open / setup / resolve はナレ優先でセリフを空にする。
 test("turn / montage はセリフを必ず残す（セリフ優先）", () => {
   const withDlg = raw(["cold_open", "setup", "turn", "montage", "resolve"]);
-  withDlg.scenes[2].dialogue = "まだ終わってない";
-  withDlg.scenes[3].dialogue = "全員、動け";
+  withDlg.scenes[2].dialogue = "We're not done yet.";
+  withDlg.scenes[3].dialogue = "Everyone, move.";
   const e = run(withDlg);
-  assert.equal(e.scenes[2].dialogue, "まだ終わってない", "turn のセリフは残る");
-  assert.equal(e.scenes[3].dialogue, "全員、動け", "montage のセリフは残る");
+  assert.equal(e.scenes[2].dialogue, "We're not done yet.", "turn のセリフは残る");
+  assert.equal(e.scenes[3].dialogue, "Everyone, move.", "montage のセリフは残る");
   assert.equal(e.scenes[2].narration, "", "turn はセリフがあるのでナレを落とす");
   assert.equal(e.scenes[3].narration, "", "montage はセリフがあるのでナレを落とす");
 });
 
 test("cold_open / setup / resolve はナレ優先でセリフを落とす", () => {
   const d = raw(["cold_open", "setup", "turn", "montage", "resolve"]);
-  d.scenes[4].dialogue = "行くぞ";
+  d.scenes[4].dialogue = "Let's move.";
   const e = run(d);
   assert.equal(e.scenes[4].dialogue, "", "resolve はナレがあるのでセリフを落とす");
   assert.notEqual(e.scenes[4].narration, "");
@@ -57,8 +57,8 @@ test("cold_open / setup / resolve はナレ優先でセリフを落とす", () =
 
 test("cold_open / setup にはそもそもセリフを置かせない（案 A）", () => {
   const d = raw(["cold_open", "setup", "turn", "montage", "resolve"]);
-  d.scenes[0].dialogue = "おつかれさまです";
-  d.scenes[1].dialogue = "これ、まずくないですか";
+  d.scenes[0].dialogue = "Have a good weekend.";
+  d.scenes[1].dialogue = "This looks wrong.";
   const e = run(d, "narration");
   assert.equal(e.scenes[0].dialogue, "");
   assert.equal(e.scenes[1].dialogue, "");
@@ -67,9 +67,9 @@ test("cold_open / setup にはそもそもセリフを置かせない（案 A）
 test("案 B（dialogue）は setup にもセリフを置ける", () => {
   const d = raw(["cold_open", "setup", "turn", "montage", "resolve"]);
   d.scenes[1].narration = "";      // 案 B はナレなしのシーンがある
-  d.scenes[1].dialogue = "これ、まずいです";
+  d.scenes[1].dialogue = "This looks wrong.";
   const e = run(d, "dialogue");
-  assert.equal(e.scenes[1].dialogue, "これ、まずいです");
+  assert.equal(e.scenes[1].dialogue, "This looks wrong.");
   assert.equal(e.style, "dialogue");
 });
 
@@ -102,7 +102,7 @@ test("on_silence は予告全体で 1 回まで（2 回目以降は cut_head に
 
 test("セリフは案 A で 3 本まで / 未知の location と characters は落とす", () => {
   const d = raw(["cold_open", "setup", "turn", "montage", "resolve"]);
-  for (const s of d.scenes) { s.narration = ""; s.dialogue = "行くぞ"; }
+  for (const s of d.scenes) { s.narration = ""; s.dialogue = "Let's move."; }
   d.scenes[2].location = "mars";
   d.scenes[2].characters = ["hero", "godzilla", "boss"];
   const e = run(d);
@@ -114,7 +114,7 @@ test("セリフは案 A で 3 本まで / 未知の location と characters は�
 test("旧 speaker キーは新キャストに読み替える", () => {
   const d = raw(["cold_open", "setup", "turn", "montage", "resolve"]);
   d.scenes[2].narration = "";
-  d.scenes[2].dialogue = "時間がない";
+  d.scenes[2].dialogue = "There's no time.";
   d.scenes[2].speaker = "male_mature";
   assert.equal(run(d).scenes[2].speaker, "boss");
 });

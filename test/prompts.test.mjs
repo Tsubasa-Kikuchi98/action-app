@@ -30,12 +30,12 @@ test("buildVideoPrompt: camera → motion → env → ambient の順で 1 文ず
 });
 
 test("buildVideoPrompt: セリフがあると話者ラベル付きの引用符行になる", () => {
-  const p = buildVideoPrompt({ ...base, dialogue: "まだ終わってない", speaker: "hero" });
-  assert.ok(p.includes('The young man (the protagonist) speaks one short line in Japanese: "まだ終わってない". Nobody else speaks.'));
+  const p = buildVideoPrompt({ ...base, dialogue: "We're not done yet.", speaker: "hero" });
+  assert.ok(p.includes(`The young man (the protagonist) speaks one short line in English: "We're not done yet.". Nobody else speaks.`));
   assert.ok(!p.includes("wordless"));
   // 話者ごとにラベルが変わる
-  assert.ok(buildVideoPrompt({ ...base, dialogue: "全員、動け", speaker: "boss" }).includes("The older man in the dark suit (the boss)"));
-  assert.ok(buildVideoPrompt({ ...base, dialogue: "気づいた", speaker: "senpai" }).includes("The woman in the navy blazer (the senior colleague)"));
+  assert.ok(buildVideoPrompt({ ...base, dialogue: "Everyone, move.", speaker: "boss" }).includes("The older man in the dark suit (the boss)"));
+  assert.ok(buildVideoPrompt({ ...base, dialogue: "It's still running.", speaker: "senpai" }).includes("The woman in the navy blazer (the senior colleague)"));
 });
 
 test("buildVideoPrompt: characters があると castLine が入る", () => {
@@ -120,7 +120,7 @@ const lintable = (over = {}) => ({
     scene_type: t,
     narration: i === 2 || i === 3 ? "" : "その日……",
     telop: `テロップ${i}`,
-    dialogue: i === 2 || i === 3 ? "行くぞ" : "",
+    dialogue: i === 2 || i === 3 ? "Let's move." : "",
     visual_metaphor: "現実 → 演出",
     duration_sec: [6, 4, 4, 6, 4][i],
   })),
@@ -129,6 +129,13 @@ const lintable = (over = {}) => ({
 
 test("lintScript: 問題のない台本では警告が出ない", () => {
   assert.deepEqual(lintScript(lintable()), []);
+});
+
+test("lintScript: セリフに日本語が残っていると警告する", () => {
+  const d = lintable();
+  d.scenes[2].dialogue = "行くぞ";
+  const w = lintScript(d);
+  assert.ok(w.some((x) => x.includes("日本語が混ざっています")), w.join(" / "));
 });
 
 test("lintScript: 禁句を検出する", () => {

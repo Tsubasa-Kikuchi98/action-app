@@ -84,7 +84,7 @@ export function buildVideoPrompt(scene, style = "narration") {
     lines.push(NOLAN_STYLE_LINE);
     lines.push(
       dialogue
-        ? `${speakerLabel(scene.speaker)} says in Japanese: "${dialogue}". ` +
+        ? `${speakerLabel(scene.speaker)} says in English: "${dialogue}". ` +
           `Their face is turned toward the camera and their mouth is clearly visible while they speak. ` +
           `No one else speaks or moves their lips, and there is no narration.`
         : `The scene is wordless and no one speaks; only ambient sound is heard.`
@@ -93,7 +93,7 @@ export function buildVideoPrompt(scene, style = "narration") {
   }
   lines.push(
     dialogue
-      ? `${speakerLabel(scene.speaker)} speaks one short line in Japanese: "${dialogue}". Nobody else speaks.`
+      ? `${speakerLabel(scene.speaker)} speaks one short line in English: "${dialogue}". Nobody else speaks.`
       : `The scene is wordless and no one speaks; only ambient sound is heard.`
   );
   return lines.join(" ");

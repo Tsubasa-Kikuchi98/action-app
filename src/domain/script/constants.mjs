@@ -58,6 +58,20 @@ export const DURATION_RAMP = [6, 4, 4, 6, 4];
 /** Veo が受け付けるシーン尺（秒）。narration.mjs がナレ実尺をここに丸め上げる。 */
 export const VEO_STEPS = [4, 6, 8];
 
+/**
+ * セリフの長さ（2026-08-30: 登場人物を欧米系にし、セリフを**英語**に切り替えた）。
+ * 日本語の「字数」では測れないので語数と文字数の両方で見る。
+ */
+export const DIALOGUE_MAX_CHARS = Number(process.env.DIALOGUE_MAX_CHARS ?? 40);
+export const DIALOGUE_MIN_WORDS = Number(process.env.DIALOGUE_MIN_WORDS ?? 2);
+export const DIALOGUE_MAX_WORDS = Number(process.env.DIALOGUE_MAX_WORDS ?? 8);
+
+/** 空白区切りの語数。 */
+export const countWords = (t) => String(t ?? "").trim().split(/\s+/).filter(Boolean).length;
+
+/** かな・漢字・全角記号が含まれるか（セリフに日本語が残っていないかの検査）。 */
+export const hasJapanese = (t) => /[\u3000-\u30ff\u3400-\u9fff\uff01-\uff60\uff66-\uff9f]/.test(String(t ?? ""));
+
 /** 惹句師 関根忠郎の禁句（trailer-structure §4 / §9-4）。検出したら warn するが削除はしない。 */
 export const FORBIDDEN_WORDS = ["感動", "衝撃", "絆", "涙", "愛", "奇跡", "最高傑作", "今世紀最大", "全米が泣いた"];
 

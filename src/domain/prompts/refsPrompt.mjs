@@ -15,7 +15,7 @@ export function buildCharPrompt(key) {
     "(1) a front-facing bust portrait, (2) a three-quarter 45-degree bust portrait, (3) a full-body standing shot.",
     "It is the same person in three views: identical face, identical hairstyle, identical clothing and identical build in all three views.",
     `Subject: ${c.en}.`,
-    "Photorealistic contemporary Japan, sharp focus, neutral colour, flat even studio lighting from the front, a plain smooth medium-grey backdrop behind the whole frame, neutral relaxed expression, arms at the sides, empty backdrop with no props and no furniture.",
+    "Photorealistic, contemporary corporate look, sharp focus, neutral colour, flat even studio lighting from the front, a plain smooth medium-grey backdrop behind the whole frame, neutral relaxed expression, arms at the sides, empty backdrop with no props and no furniture.",
     NO_TEXT + ".",
   ].join(" ");
 }
