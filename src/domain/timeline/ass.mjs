@@ -1,6 +1,6 @@
 // ASS（字幕）ファイルの文字列生成（純関数）。ファイル書き込みは adapters/ffmpeg/ass.mjs。
 // テロップ・画面内テロップ・各カードの文字を「絶対時刻の ASS 1 枚」に集約する。
-import { W, H, FONTNAME } from "./constants.mjs";
+import { W, H, FONTNAME, FONTNAME_NOLAN, FONTNAME_NOLAN_TITLE, NOLAN_SPACING } from "./constants.mjs";
 
 export const assTime = (sec) => {
   const s = Math.max(0, sec);
@@ -51,6 +51,12 @@ export function buildAss(events) {
     `Style: EndCard,${FONTNAME},96,&H00FFFFFF,&H000000FF,&H00101010,&H00000000,-1,0,0,0,100,100,30,0,1,0,0,5,0,0,0,1`,
     `Style: Coming,${FONTNAME},36,&H00E0E0E0,&H000000FF,&H00101010,&H00000000,-1,0,0,0,100,100,22,0,1,0,0,5,0,0,0,1`,
     `Style: Cast,${FONTNAME},24,&H00C8C8C8,&H000000FF,&H00101010,&H00000000,0,0,0,0,100,100,8,0,1,0,0,5,0,0,0,1`,
+    // --- nolan（黒地・白の細めゴシック・字間を広く・縁取りと影は無し）---
+    `Style: PresentsNolan,${FONTNAME_NOLAN},32,&H00D2D2D2,&H000000FF,&H00101010,&H00000000,0,0,0,0,100,100,${NOLAN_SPACING.PresentsNolan},0,1,0,0,5,0,0,0,1`,
+    `Style: CardNolan,${FONTNAME_NOLAN},62,&H00FFFFFF,&H000000FF,&H00101010,&H00000000,0,0,0,0,100,100,${NOLAN_SPACING.CardNolan},0,1,0,0,5,0,0,0,1`,
+    `Style: TitleNolan,${FONTNAME_NOLAN_TITLE},112,&H00FFFFFF,&H000000FF,&H00101010,&H00000000,0,0,0,0,100,100,${NOLAN_SPACING.TitleNolan},0,1,0,0,5,0,0,0,1`,
+    `Style: TitleSubNolan,${FONTNAME_NOLAN},30,&H00C8C8C8,&H000000FF,&H00101010,&H00000000,0,0,0,0,100,100,${NOLAN_SPACING.TitleSubNolan},0,1,0,0,5,0,0,0,1`,
+    `Style: EndNolan,${FONTNAME_NOLAN},64,&H00FFFFFF,&H000000FF,&H00101010,&H00000000,0,0,0,0,100,100,${NOLAN_SPACING.EndNolan},0,1,0,0,5,0,0,0,1`,
     "",
     "[Events]",
     "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text",

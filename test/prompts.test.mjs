@@ -70,6 +70,8 @@ test("画像プロンプト: 参照ありは順序を明示、参照なしは外
   assert.ok(edit.startsWith("Reference images, in this order:"));
   assert.ok(edit.includes("a character sheet (three views of the same person)"));
   assert.ok(edit.includes("a location plate of"));
+  assert.ok(edit.includes("the setting must match the location plate"));
+  assert.ok(buildEditPrompt(scene, { chars: ["hero"], loc: null, files: ["a"] }).includes("Build the setting from the description"));
   assert.ok(edit.endsWith(STYLE_SUFFIX));
 
   const gen = buildGeneratePrompt(scene);

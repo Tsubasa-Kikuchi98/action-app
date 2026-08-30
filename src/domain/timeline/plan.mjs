@@ -14,6 +14,7 @@ import {
   XFADE_SEC, ZOOM_BY_TYPE, SHAKE_TYPES, MAX_CUT_BY_TYPE, MAX_CUTS_PER_SCENE,
   TELOP_MAX_CUT_HEAD, TELOP_MAX_AFTER_NAR, SLOW_FACTOR, snap,
 } from "./constants.mjs";
+import { planNolan } from "./planNolan.mjs";
 
 /**
  * @param {object} view enrichedView() を通した台本
@@ -22,6 +23,9 @@ import {
  * @returns {object} { segs, nar, dlg, btn, ass, total, xfadeAfter, xfadeSec, silence, silences, src }
  */
 export function planTimeline(view, src) {
+  // nolan は構成そのものが違う（カード ↔ カット・分割なし・SFX レーンあり）ので専用の設計に回す。
+  if (view.style === "nolan") return planNolan(view, src);
+
   const n = view.scenes.length;
   const segs = [];
   const nar = [];
@@ -277,8 +281,8 @@ export function planTimeline(view, src) {
   const total = segs.reduce((a, s) => a + s.outSec, 0) - shift;
   silences.sort((a, b) => a.start - b.start);
   return {
-    segs, nar, dlg, btn, ass, total,
+    segs, nar, dlg, btn, sfx: [], ass, total,
     xfadeAfter: useXfade ? xfadeAfter : -1, xfadeSec: shift,
-    silence, silences, src,
+    silence, silences, src, style: view.style,
   };
 }

@@ -3,12 +3,16 @@
 import {
   SCENE_TYPES, TELOP_TIMINGS, STYLES, DEFAULT_STYLE, SCENE_COUNT,
   DURATION_RAMP, DEFAULT_CUT_COUNT, DEFAULT_CAMERA_BEAT,
-  guessSceneType, cutCap, maxDialogue,
+  NOLAN_SCENE_TYPES, NOLAN_SPEAKER_BY_TYPE, NOLAN_DURATION, NOLAN_SCENE_COUNT,
+  guessSceneType, cutCap, maxDialogue, sceneCountFor,
 } from "./constants.mjs";
 import { CAST, SPEAKERS, LEGACY_SPEAKER, LOCATION_KEYS, defaultLocation } from "../cast.mjs";
 
 /** 改行を潰して 1 行にする。 */
 export const oneLine = (v) => String(v ?? "").replace(/[\r\n]+/g, " ").trim();
+
+/** nolan の提供カードは固定文言（env NOLAN_PRESENTS で上書き可）。 */
+export const NOLAN_PRESENTS = process.env.NOLAN_PRESENTS ?? "IFTC 提供";
 
 /**
  * @param {object} data      モデルの生出力（JSON.parse 済み）
@@ -18,21 +22,23 @@ export const oneLine = (v) => String(v ?? "").replace(/[\r\n]+/g, " ").trim();
  * @returns {object} 正規化した台本（引数の data を破壊的に更新して返す）
  */
 export function normalize(data, episode, style = DEFAULT_STYLE, opts = {}) {
+  const wantStyle0 = STYLES.includes(style) ? style : "narration";
   const {
     model = "",
     createdAt = new Date().toISOString(),
-    sceneCount = SCENE_COUNT,
+    sceneCount = sceneCountFor(wantStyle0),
     warn = (m) => console.warn(m),
   } = opts;
 
   if (!Array.isArray(data.scenes) || data.scenes.length === 0) throw new Error("scenes が空です");
+  if (wantStyle0 === "nolan") return normalizeNolan(data, episode, { model, createdAt, sceneCount, warn });
   if (data.scenes.length !== sceneCount) {
     warn(`  [warn] scenes が ${data.scenes.length} 件でした → ${sceneCount} 件に調整します`);
     data.scenes = data.scenes.slice(0, sceneCount);
     while (data.scenes.length < sceneCount) data.scenes.push({ ...data.scenes[data.scenes.length - 1] });
   }
   const n = data.scenes.length;
-  const wantStyle = STYLES.includes(style) ? style : "narration";
+  const wantStyle = wantStyle0;
 
   // セリフは全体で maxDialogue 本まで（cold_open / setup には置かせない）
   // 案 B（dialogue）だけは setup にも置ける（S2 のセリフ①が構成上必要なため）
@@ -107,6 +113,80 @@ export function normalize(data, episode, style = DEFAULT_STYLE, opts = {}) {
   data.model = model;
   data.created_at = createdAt;
   // enrich と同じ「拡張済み」マーカー。render はこれを見てカット割り等を有効にする。
+  data.enriched = true;
+  return data;
+}
+
+
+/**
+ * nolan（style: "nolan"）の正規化。
+ *
+ * 構成は固定なので、モデルの自由度をここで潰して必ず同じ形にする:
+ *   - シーンはちょうど 3 枚（discover / struggle / mobilize の順）
+ *   - **ナレーションは全シーン空**（声は Veo が口パクで喋るセリフだけ）
+ *   - **セリフは全シーン必須**。話者はシーン種別で固定（先輩 → 主人公 → 上司）
+ *   - **カット内の文字は一切なし**（telop / screen_text は空、cut_count は 1）
+ *   - 中間カードはちょうど 2 枚（after_scene 1 / 2）
+ *   - presents は固定文言、cast_lines / review_line / stake / button_line は空
+ */
+function normalizeNolan(data, episode, { model, createdAt, sceneCount, warn }) {
+  const want = sceneCount || NOLAN_SCENE_COUNT;
+  if (data.scenes.length !== want) {
+    warn(`  [warn] scenes が ${data.scenes.length} 件でした → ${want} 件に調整します`);
+    data.scenes = data.scenes.slice(0, want);
+    while (data.scenes.length < want) data.scenes.push({ ...data.scenes[data.scenes.length - 1] });
+  }
+
+  data.scenes = data.scenes.map((s, i) => {
+    const type = NOLAN_SCENE_TYPES[i] ?? NOLAN_SCENE_TYPES[NOLAN_SCENE_TYPES.length - 1];
+    const speaker = NOLAN_SPEAKER_BY_TYPE[type];
+    // セリフは 4〜10 字。長すぎるものは切る（Veo の 3〜4 秒に収める）
+    const dialogue = oneLine(s.dialogue).slice(0, 12);
+    // その場面に映るのは基本その 1 人（モデルが足していれば最大 3 人まで許す）
+    const chars = (Array.isArray(s.characters) ? s.characters : []).filter((c) => CAST[c]);
+    const characters = chars.includes(speaker) ? chars.slice(0, 3) : [speaker, ...chars].slice(0, 3);
+    return {
+      narration: "",
+      telop: "",
+      image_prompt: String(s.image_prompt ?? "").trim(),
+      video_prompt: String(s.video_prompt ?? "").trim(),
+      duration_sec: NOLAN_DURATION[type],
+      index: i + 1,
+      scene_type: type,
+      location: LOCATION_KEYS.includes(s.location) ? s.location : defaultLocation(type),
+      cut_count: 1,
+      visual_metaphor: oneLine(s.visual_metaphor).slice(0, 60),
+      motion_beat: String(s.motion_beat ?? "").trim(),
+      camera_beat: String(s.camera_beat ?? "").trim() || DEFAULT_CAMERA_BEAT[type],
+      ambient: String(s.ambient ?? "").trim(),
+      dialogue,
+      speaker: dialogue ? speaker : "none",
+      characters,
+      telop_timing: "cut_head",
+      screen_text: [],
+    };
+  });
+
+  const n = data.scenes.length;
+  data.title = oneLine(data.title) || "無題";
+  data.tagline = oneLine(data.tagline).slice(0, 12);
+  data.presents = NOLAN_PRESENTS;
+  data.release_line = oneLine(data.release_line) || "近日公開";
+  data.style = "nolan";
+  // nolan は「カード＝短い断言」だけで持たせる。煽り・賭け金・落ちのレーンは使わない。
+  data.button_line = "";
+  data.review_line = "";
+  data.stake = "";
+  data.cast_lines = [];
+  const inter = (Array.isArray(data.interstitials) ? data.interstitials : [])
+    .map((it) => oneLine(it?.text))
+    .filter(Boolean)
+    .slice(0, n - 1);
+  while (inter.length < n - 1) inter.push("");
+  data.interstitials = inter.map((text, i) => ({ text, after_scene: i + 1 }));
+  data.episode = episode;
+  data.model = model;
+  data.created_at = createdAt;
   data.enriched = true;
   return data;
 }

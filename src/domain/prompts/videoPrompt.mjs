@@ -23,7 +23,18 @@ export const ENV_BEAT = {
   turn: "warning light pulsing, shadows sweeping past",
   montage: "sparks and steam crossing frame, silhouettes moving in the background",
   resolve: "slow-moving haze, first light spreading across the room",
+  // nolan: 背景の動きも静か。空気とわずかな光の変化だけ。
+  discover: "faint reflections shifting on the glass, a cursor blinking on a distant screen",
+  struggle: "cooling fans breathing, a thin haze drifting through the monitor light",
+  mobilize: "the corridor lights holding steady, a door swinging slowly behind him",
 };
+
+/** nolan で全カットに固定で足す撮り方の指定（カメラは静か・文字は出さない）。 */
+export const NOLAN_STYLE_LINE =
+  "Filmed in the restrained style of a Christopher Nolan trailer: the camera is quiet and almost static " +
+  "(locked-off tripod or a very slow dolly), the framing is a wide symmetrical composition with the subject centred, " +
+  "and the light comes only from sources visible in the frame. " +
+  "No handheld shake, no zoom, no whip pan, no lens flare bursts, no on-screen text or subtitles.";
 
 /** 環境音が台本に無いときのフォールバック。 */
 export const AMBIENT_FALLBACK = "low room tone and distant machinery";
@@ -41,7 +52,7 @@ export const speakerLabel = (sp) =>
  * enrich 済みなら camera_beat / motion_beat / ambient / dialogue を使い、
  * 旧 script.json（Phase 1/2）では video_prompt / image_prompt にフォールバックする。
  */
-export function buildVideoPrompt(scene) {
+export function buildVideoPrompt(scene, style = "narration") {
   const type = scene.scene_type ?? "setup";
   const camera = (scene.camera_beat ?? "").trim() || CAMERA_FALLBACK[type] || CAMERA_FALLBACK.setup;
   const motion = (scene.motion_beat ?? "").trim();
@@ -66,10 +77,25 @@ export function buildVideoPrompt(scene) {
     `Secondary motion: ${env}.`,
     `The scene keeps the exact lighting, color and framing of the source image.${castLine}`,
     `Ambient noise: ${ambient}.`,
+  ];
+  if (style === "nolan") {
+    // nolan はセリフを Veo に口パクで喋らせる（TTS で後から重ねない）ので、
+    // 「誰が・何を・口元が見える形で」言うのかを最後に 1 文で置く。
+    lines.push(NOLAN_STYLE_LINE);
+    lines.push(
+      dialogue
+        ? `${speakerLabel(scene.speaker)} says in Japanese: "${dialogue}". ` +
+          `Their face is turned toward the camera and their mouth is clearly visible while they speak. ` +
+          `No one else speaks or moves their lips, and there is no narration.`
+        : `The scene is wordless and no one speaks; only ambient sound is heard.`
+    );
+    return lines.join(" ");
+  }
+  lines.push(
     dialogue
       ? `${speakerLabel(scene.speaker)} speaks one short line in Japanese: "${dialogue}". Nobody else speaks.`
-      : `The scene is wordless and no one speaks; only ambient sound is heard.`,
-  ];
+      : `The scene is wordless and no one speaks; only ambient sound is heard.`
+  );
   return lines.join(" ");
 }
 

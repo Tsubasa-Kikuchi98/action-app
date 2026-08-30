@@ -12,6 +12,8 @@ import { textGenerator } from "../adapters/openai/text.mjs";
 import { imageGenerator } from "../adapters/openai/image.mjs";
 import { speechGenerator } from "../adapters/openai/tts.mjs";
 import { videoGenerator } from "../adapters/gemini/veo.mjs";
+import { soundGenerator } from "../adapters/elevenlabs/sfx.mjs";
+import { musicGenerator } from "../adapters/elevenlabs/music.mjs";
 
 export { ROOT, rel, MODELS };
 
@@ -32,6 +34,7 @@ export const media = {
   probeDuration: ffmpegExec.probeDuration,
   probeSummary: ffmpegExec.probeSummary,
   probeVolume: ffmpegExec.probeVolume,
+  probeLevels: ffmpegExec.probeLevels,
 };
 
 /** FileStore ポート（usecases はこれ経由でだけファイルに触る）。 */
@@ -52,6 +55,8 @@ export const refs = {
  * usecase ごとに必要な形（deps.script / deps.image / …）に束ねてある。
  */
 export function createDeps() {
+  const bgmDir = path.join(ROOT, "assets", "bgm");
+  const sfxDir = path.join(ROOT, "assets", "sfx");
   return {
     store,
     media,
@@ -77,7 +82,10 @@ export function createDeps() {
     video: { video: videoGenerator, store, media, files, model: MODELS.video },
 
     // ④ BGM
-    bgm: { store, media, files, bgmDir: path.join(ROOT, "assets", "bgm") },
+    bgm: { store, media, files, music: musicGenerator, bgmDir },
+
+    // ⑥ 効果音（ブラーム。assets/sfx/ にジョブ横断で置く）
+    sfx: { sound: soundGenerator, store, media, files, sfxDir },
 
     // ⑤ 合成
     render: {
@@ -85,6 +93,7 @@ export function createDeps() {
       media,
       files,
       rel,
+      sfxDir,
       ffmpegRender: {
         writeAss,
         renderCut: ffmpegFilters.renderCut,

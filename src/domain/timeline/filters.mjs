@@ -7,7 +7,8 @@
 //   - zoompan の前に scale=iw*4:ih*4、fps=30 / s=1920x1080 を明示（静止画フォールバック経路）
 //   - xfade の 2 入力は両方に settb=AVTB,fps,format,setsar を掛ける
 import {
-  W, H, FPS, BAR, AMBIENT_VOL, NAR_VOL, DLG_VOL, BTN_VOL, BGM_VOL, frames,
+  W, H, FPS, BAR, AMBIENT_VOL, NAR_VOL, DLG_VOL, BTN_VOL, BGM_VOL,
+  NOLAN_BGM_VOL, SFX_VOL, frames,
 } from "./constants.mjs";
 
 // ---------------------------------------------------------------- カット
@@ -110,8 +111,29 @@ export function buildCutFilter(seg) {
 }
 
 // ---------------------------------------------------------------- 最終合成
+/**
+ * nolan のルック: teal-orange グレード・ブルーム・強いグレインを外し、
+ * 彩度を落とした鋼色の青と硬めのコントラストだけにする（ノーラン作品の色）。
+ */
+export function lookFilterNolan(inLabel, assRel, outLabel) {
+  return [
+    `${inLabel}scale=${W}:${H}:flags=lanczos,fps=${FPS},` +
+      // 影を青に寄せ、ハイライトをわずかに冷たく（鋼色）
+      `colorbalance=rs=-0.04:bs=0.08:rm=-0.02:bm=0.03:rh=-0.02:bh=0.02,` +
+      `eq=contrast=1.12:saturation=0.80:gamma=0.98,` +
+      `vignette=PI/4[graded]`,
+    // グレインは微量、ブルームは掛けない
+    `[graded]noise=alls=2:allf=t,` +
+      `ass=f=${assRel},` +
+      `drawbox=x=0:y=0:w=iw:h=${BAR}:color=black@1:t=fill,` +
+      `drawbox=x=0:y=ih-${BAR}:w=iw:h=${BAR}:color=black@1:t=fill,` +
+      `settb=AVTB,fps=${FPS},setsar=1,format=yuv420p${outLabel}`,
+  ];
+}
+
 /** グレード → ブルーム → グレイン → ASS → レターボックス（quality-research §D-1）。 */
-export function lookFilter(inLabel, assRel, outLabel) {
+export function lookFilter(inLabel, assRel, outLabel, style = "narration") {
+  if (style === "nolan") return lookFilterNolan(inLabel, assRel, outLabel);
   return [
     `${inLabel}scale=${W}:${H}:flags=lanczos,fps=${FPS},` +
       `curves=r='0/0.00 0.5/0.52 1/1.00':g='0/0.005 0.5/0.50 1/0.995':b='0/0.030 0.5/0.48 1/0.95',` +
@@ -162,7 +184,10 @@ export function buildComposeFilter(plan, { cutCount, assRel, bgm }) {
   const narBase = N;
   const dlgBase = narBase + plan.nar.length;
   const btnBase = dlgBase + plan.dlg.length;
-  const bgmIdx = btnBase + plan.btn.length;
+  const sfxBase = btnBase + plan.btn.length;
+  const sfxList = plan.sfx ?? [];
+  const bgmIdx = sfxBase + sfxList.length;
+  const style = plan.style ?? "narration";
 
   // --- 各カットを揃える ---------------------------------------------------
   plan.segs.forEach((seg, k) => {
@@ -210,7 +235,7 @@ export function buildComposeFilter(plan, { cutCount, assRel, bgm }) {
   }
 
   // --- 映像のルック -------------------------------------------------------
-  lines.push(...lookFilter("[vcat]", assRel, "[v]"));
+  lines.push(...lookFilter("[vcat]", assRel, "[v]", style));
 
   // --- 音: 環境音レーン ---------------------------------------------------
   lines.push(
@@ -264,6 +289,22 @@ export function buildComposeFilter(plan, { cutCount, assRel, bgm }) {
     btnLabel = "[btnv]";
   }
 
+  // --- 音: SFX レーン（ブラーム。カードの開始時刻に置く。ダッキングはしない）---
+  let sfxLabel = null;
+  if (sfxList.length) {
+    sfxList.forEach((e, k) => {
+      const ms = Math.round(e.at * 1000);
+      lines.push(
+        `[${sfxBase + k}:a]aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,` +
+          `adelay=${ms}|${ms}[sx${k}]`
+      );
+    });
+    if (sfxList.length === 1) lines.push(`[sx0]anull[sfxmix]`);
+    else lines.push(`${sfxList.map((_, k) => `[sx${k}]`).join("")}amix=inputs=${sfxList.length}:normalize=0:duration=longest[sfxmix]`);
+    lines.push(`[sfxmix]volume=${SFX_VOL},apad,atrim=0:${total.toFixed(3)},asetpts=N/SR/TB[sfxv]`);
+    sfxLabel = "[sfxv]";
+  }
+
   // --- ダッキングのキー（ナレ + セリフ） -----------------------------------
   lines.push(`[narv]asplit=2[nar_main][nar_key]`);
   if (dlgLabel) {
@@ -281,11 +322,12 @@ export function buildComposeFilter(plan, { cutCount, assRel, bgm }) {
   const mixIn = ["[ambduck]", "[nar_main]"];
   if (dlgLabel) mixIn.push("[dlg_main]");
   if (btnLabel) mixIn.push(btnLabel);
+  if (sfxLabel) mixIn.push(sfxLabel);
   if (bgm) {
     const loop = bgm.dur < total ? `aloop=loop=-1:size=${Math.round(bgm.dur * 48000)},` : "";
     lines.push(
       `[${bgmIdx}:a]aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,${loop}` +
-        `atrim=0:${total.toFixed(3)},asetpts=N/SR/TB,volume=${BGM_VOL},` +
+        `atrim=0:${total.toFixed(3)},asetpts=N/SR/TB,volume=${style === "nolan" ? NOLAN_BGM_VOL : BGM_VOL},` +
         `afade=t=in:st=0:d=2,afade=t=out:st=${Math.max(0, total - 2.5).toFixed(3)}:d=2.5[bgmv]`
     );
     lines.push(`[bgmv][key_bgm]sidechaincompress=threshold=0.04:ratio=6:attack=15:release=350[bgmduck]`);

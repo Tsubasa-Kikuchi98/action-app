@@ -96,6 +96,41 @@ export async function probeVolume(file, { ss = null, to = null } = {}) {
   return { mean: parseFloat(mean[1]), max: max ? parseFloat(max[1]) : null };
 }
 
+/**
+ * 音声を一定長の窓に切って窓ごとの RMS（dB）を返す。ffmpeg 1 回で済ませる。
+ *   asetnsamples で窓を作り、astats を窓ごとにリセットして ametadata で吐かせる。
+ * @param {string} file
+ * @param {{windowSec?: number, af?: string}} opts af は astats の前に挟むフィルタ（帯域制限など）
+ * @returns {Promise<Array<{t: number, rms: number}>>} 音声が無ければ空配列
+ */
+export async function probeLevels(file, { windowSec = 0.4, af = "" } = {}) {
+  const n = Math.max(1, Math.round(48000 * windowSec));
+  const chain = [
+    "aresample=48000",
+    af,
+    `asetnsamples=n=${n}:p=0`,
+    "astats=metadata=1:reset=1",
+    "ametadata=print:key=lavfi.astats.Overall.RMS_level:file=-",
+  ].filter(Boolean).join(",");
+  const r = await run(ffmpegPath(), [
+    "-hide_banner", "-nostdin", "-i", file, "-map", "0:a:0?", "-af", chain, "-f", "null", "-",
+  ]);
+  const out = [];
+  // frame:0    pts:0       pts_time:0
+  // lavfi.astats.Overall.RMS_level=-32.123
+  let t = null;
+  for (const line of r.stdout.split(/\r?\n/)) {
+    const m = /pts_time:([-0-9.]+)/.exec(line);
+    if (m) { t = parseFloat(m[1]); continue; }
+    const v = /RMS_level=(-?[\d.]+|-inf)/.exec(line);
+    if (v && t != null) {
+      out.push({ t, rms: v[1] === "-inf" ? -100 : parseFloat(v[1]) });
+      t = null;
+    }
+  }
+  return out;
+}
+
 /** 動画の要約（解像度 / fps / コーデック / 尺）。 */
 export async function probeSummary(file) {
   const r = await run(ffprobePath(), [

@@ -2,7 +2,7 @@
 //
 // 流れ（Phase 2）:
 //   ① 台本 → ①' 演出(enrich, 不足時のみ) → ⓪ 基準画像(不足分のみ)
-//     → ｛② 画像 ‖ ③' ナレ+セリフ ‖ ④ BGM｝並列
+//     → ｛② 画像 ‖ ③' ナレ+セリフ ‖ ④ BGM ‖ ⑥ 効果音｝並列
 //     → ③ 動画(Veo) → ⑤ 合成
 //   ③ を並列グループに入れないのは、起点画像（②）と 4/6/8 に丸めた尺（③'）の両方に依存するため。
 //   --stills を付けると ③ をスキップして Phase 1 相当（静止画 Ken Burns のみ）になる。
@@ -17,6 +17,7 @@ import { generateImages } from "./generateImages.mjs";
 import { generateNarration } from "./generateNarration.mjs";
 import { generateVideos } from "./generateVideos.mjs";
 import { prepareBgm } from "./prepareBgm.mjs";
+import { prepareSfx } from "./prepareSfx.mjs";
 import { renderTrailer } from "./renderTrailer.mjs";
 
 /**
@@ -63,15 +64,17 @@ export async function runPipeline(deps, episode, job, { force = false, skipScrip
     return prepareRefs(deps.refsUseCase, { ...need, force: false });
   });
 
-  // ② 画像 ‖ ③' ナレーション ‖ ④ BGM（互いに独立なので並列）
-  //   ※ script.json を書き戻すのは narration だけ。images / bgm は読むだけなので競合しない。
-  await step("②③'④ 並列", async () => {
-    const [img, nar, bgm] = await Promise.all([
+  // ② 画像 ‖ ③' ナレーション ‖ ④ BGM ‖ ⑥ 効果音（互いに独立なので並列）
+  //   ※ script.json を書き戻すのは narration だけ。images / bgm / sfx は読むだけなので競合しない。
+  //   ⑥ は assets/sfx/ にジョブ横断で残るので、2 本目以降は毎回スキップされる。
+  await step("②③'④⑥ 並列", async () => {
+    const [img, nar, bgm, sfx] = await Promise.all([
       generateImages(deps.image, job, { force }),
       generateNarration(deps.speech, job, { force }),
       prepareBgm(deps.bgm, job, { force }),
+      prepareSfx(deps.sfx, {}),
     ]);
-    return { cost: (img?.cost ?? 0) + (nar?.cost ?? 0) + (bgm?.cost ?? 0) };
+    return { cost: (img?.cost ?? 0) + (nar?.cost ?? 0) + (bgm?.cost ?? 0) + (sfx?.cost ?? 0) };
   });
 
   // ③ 動画（Veo）: 起点画像と確定した duration_sec が必要なので並列グループの後

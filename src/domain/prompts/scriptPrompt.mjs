@@ -2,6 +2,7 @@
 // 外部依存なし。API を呼ぶのは adapters/openai/text.mjs、組み立ての指揮は usecases/generateScript.mjs。
 import {
   SCENE_TYPES, TELOP_TIMINGS, STYLES, SCENE_COUNT, NAR_TOTAL_MAX, DURATION_RAMP,
+  NOLAN_SCENE_COUNT, NOLAN_SCENE_TYPES,
 } from "../script/constants.mjs";
 import { SPEAKERS, LOCATIONS, LOCATION_KEYS } from "../cast.mjs";
 import { PARODY_PRINCIPLES, COPY_PRINCIPLES } from "./principles.mjs";
@@ -176,8 +177,60 @@ export const SCRIPT_SCHEMA = {
   },
 };
 
+/** nolan（3 カット・ナレなし・カード主導）用のスキーマ。SCRIPT_SCHEMA から説明文だけ差し替える。 */
+export const NOLAN_SCRIPT_SCHEMA = (() => {
+  const sc = structuredClone(SCRIPT_SCHEMA);
+  const P = sc.properties;
+  const S = P.scenes.items.properties;
+
+  P.presents.description = "冒頭の提供カード。**必ず「IFTC 提供」**（コード側でも固定される）。";
+  P.tagline.description = "タイトルカードの下に極小で 1 行だけ添える。8 字以内。不要なら空文字。";
+  P.review_line.description = "nolan では使わない。**必ず空文字**。";
+  P.stake.description = "nolan では使わない。**必ず空文字**。";
+  P.button_line.description = "nolan では使わない。**必ず空文字**。";
+  P.cast_lines.description = "nolan では使わない。**必ず空配列**（キャスト行は出さない）。";
+  P.release_line.description = "最後のエンドカードの文言。「近日公開」を基本に、8 字以内。";
+  P.title.description =
+    "映画のタイトル。**日本語 4〜8 字の体言止め 1 行**。字間を極端に広げて 1 行で出すので短いほど強い" +
+    "（例: 復旧不能 / 二十万の夜 / 帰還不能点）。中身は日常のまま。";
+  P.interstitials.description =
+    "カットとカットの間に挟む黒背景・白文字のカード。**ちょうど 2 枚**。1 枚目は after_scene 1、2 枚目は after_scene 2。";
+  P.interstitials.items.properties.text.description =
+    "日本語 8〜14 字の短い断言。**時間・不可逆・引き返せなさ**の語彙で書く" +
+    "（例: 気づいた時には、遅かった。/ 時間は、待たない。/ 戻る道は、ない。）。句点で終えてよい。" +
+    "事実の説明はしない。2 枚で同じ型を使わない。";
+
+  S.narration.description = "nolan では使わない。**必ず空文字**（この予告にナレーションは無い）。";
+  S.telop.description = "nolan では使わない。**必ず空文字**（カット内に文字は一切出さない）。";
+  S.screen_text.description = "nolan では使わない。**必ず空配列**。";
+  S.dialogue.description =
+    "そのシーンの人物が声に出して言う日本語の一言。**4〜10 字。全 3 シーンで必須**。" +
+    "動画 AI が口パク付きで喋らせるので、短く言い切る形にする（例: 止まってない / 間に合わない / 私が話す）。説明台詞は禁止。";
+  S.speaker.description = "s1=senpai（先輩）/ s2=hero（主人公）/ s3=boss（上司）で固定。";
+  S.scene_type.description = `nolan は ${NOLAN_SCENE_TYPES.join(" → ")} の順で固定（s1=discover / s2=struggle / s3=mobilize）。`;
+  S.duration_sec.description = "s1=3 / s2=4 / s3=3 で固定（コード側でも固定される）。";
+  S.cut_count.description = "nolan は 1 クリップ 1 カット。**必ず 1**。";
+  S.telop_timing.description = "nolan では使わない。cut_head を返す。";
+  S.camera_beat.description =
+    "英語。**カメラは静か**にする。使えるのは locked-off shot / very slow dolly in / slow push in / static wide shot だけ。" +
+    "handheld / shake / whip pan / crash zoom は禁止。";
+  S.motion_beat.description =
+    "英語。**被写体の動きは大きく**（stands up sharply / slams the laptop shut / strides through the door）。カメラではなく人と物が動く。";
+  S.image_prompt.description =
+    "英語の画像生成プロンプト。**広いシンメトリー構図**（被写体を画面中央に置き、左右が釣り合う）。" +
+    "照明は画面内に実在する光源だけ（モニタ・窓・天井灯）。**人物の口元が見える正面〜斜め 45 度**にする。文字は入れない。";
+  P.scenes.description = `シーンの配列。必ずちょうど ${NOLAN_SCENE_COUNT} 要素（1 先輩が気づく / 2 主人公がもがく / 3 上司が動き出す）。`;
+  return sc;
+})();
+
+/** style に応じた JSON スキーマを返す。 */
+export function buildScriptSchema(style = "narration") {
+  return style === "nolan" ? NOLAN_SCRIPT_SCHEMA : SCRIPT_SCHEMA;
+}
+
 /** style 別の構成指示（trailer-structure §8 案 A / 案 B）。 */
 function structureBlock(style) {
+  if (style === "nolan") return NOLAN_STRUCTURE;
   if (style === "dialogue") {
     return `# 構成（案 B: セリフ・テロップ主導 / 30 秒）
 | 秒 | 要素 | 中身 |
@@ -225,6 +278,7 @@ function structureBlock(style) {
 }
 
 export function buildScriptSystemPrompt(style = "narration") {
+  if (style === "nolan") return buildNolanSystemPrompt();
   return `あなたはハリウッド映画の予告編（トレーラー）を作る構成作家 兼 編集・演出担当です。
 入力された「実際にあった仕事の失敗」を、本物のアクション映画の予告編の形式に流し込んでください。
 
@@ -281,10 +335,7 @@ ${structureBlock(style)}
 # 画面内テロップ（screen_text）
 - モニタや時計に映る「実在する表示」として自然なものだけ。英数字中心。緊張が高いシーンに 1〜2 個、静かなシーンは空配列。
 
-# 舞台（location）
-- **舞台はキーで選ぶ。自由記述にしない。** 選べるのは次だけ: ${LOCATION_KEYS.map((k) => `${k}（${LOCATIONS[k].jp}）`).join(" / ")}。
-- **予告全体で 2〜3 箇所に絞る。同じ場所のシーンは同じ location キーを使う。**（毎シーン舞台を変えると別作品に見える）
-- image_prompt はその location と矛盾しないように書く。部屋の作り・照明・小物は基準画像側で固定されるので、image_prompt には**その場所で何が起きているか**（人物の動作・カメラ・光の変化）だけを書く。
+${locationBlock()}
 
 # telop_timing
 - turn / montage は cut_head、cold_open / setup / resolve は after_narration を基本にする。
@@ -294,6 +345,83 @@ ${structureBlock(style)}
 今回は **style: "${style}"** で書くこと。出力の style フィールドにも "${style}" を入れる。
 
 出力は指定された JSON スキーマに厳密に従い、scenes は必ずちょうど ${SCENE_COUNT} 要素にすること。`;
+}
+
+/** 舞台（location）の指示。全 style で共有する。 */
+function locationBlock() {
+  return `# 舞台（location）
+- **舞台はキーで選ぶ。自由記述にしない。** 選べるのは次だけ: ${LOCATION_KEYS.map((k) => `${k}（${LOCATIONS[k].jp}）`).join(" / ")}。
+- **予告全体で 2〜3 箇所に絞る。同じ場所のシーンは同じ location キーを使う。**（毎シーン舞台を変えると別作品に見える）
+- image_prompt はその location と矛盾しないように書く。部屋の作り・照明・小物は基準画像側で固定されるので、image_prompt には**その場所で何が起きているか**（人物の動作・カメラ・光の変化）だけを書く。`;
+}
+
+/** nolan の構成表（クリストファー・ノーラン作品の予告の形）。 */
+const NOLAN_STRUCTURE = `# 構成（nolan: 3 カット・ナレなし・カード主導 / 約 20 秒）
+| 秒 | 要素 | 中身 |
+|---|---|---|
+| 0.0-1.4 | 提供カード | 「IFTC 提供」（黒地に白・字間広め） |
+| 1.4-4.4 | **カット 1（3 秒）** | **先輩**が失敗に気づく。先輩のセリフ一言 |
+| 4.4-6.0 | 中間カード① | 短い断言。表示と同時に低音のブラームが鳴る |
+| 6.0-10.0 | **カット 2（4 秒）** | **主人公**が対処するがうまくいかず、もがく。主人公のセリフ一言 |
+| 10.0-11.6 | 中間カード② | 短い断言 ＋ ブラーム |
+| 11.6-14.6 | **カット 3（3 秒）** | **上司**が動き出す。上司のセリフ一言。**解決は見せない** |
+| 14.6-15.0 | 無音の黒 | 全レーン無音 |
+| 15.0-18.0 | タイトルカード | 大きな白文字 1 行（字間を極端に広く）＋ 極小のタグライン |
+| 18.0-20.0 | エンドカード | release_line（近日公開 等） |
+
+- **ナレーションは 1 本も無い**（narration は全シーン空文字）。声はカット内のセリフだけ。
+- **カット内に文字を一切出さない**（telop / screen_text は空文字・空配列）。文字はカードでしか出さない。
+- **セリフは 3 本、各 4〜10 字**。話者は s1 先輩 → s2 主人公 → s3 上司で固定。
+- **1 シーン 1 カット**（cut_count は必ず 1）。カットの分割・白フラッシュ・クロスフェードは使わない。
+- COMING SOON・キャスト行・煽りテロップ・賭け金カードは**出さない**（review_line / stake / button_line / cast_lines は空）。`;
+
+/** nolan 用のシステムプロンプト。原理・演出文法・固定キャスト・禁句は共有し、構成だけ差し替える。 */
+function buildNolanSystemPrompt() {
+  return `あなたはクリストファー・ノーラン作品の予告編（トレーラー）を作る構成作家 兼 編集・演出担当です。
+入力された「実際にあった仕事の失敗」を、ノーラン作品の予告の形式（短いカットと黒地のカードの往復・ナレーションなし・重い低音）に流し込んでください。
+
+${PARODY_PRINCIPLES}
+
+${COPY_PRINCIPLES}
+
+${NOLAN_STRUCTURE}
+
+# ノーラン風の作法（**上のアクション演出の記述よりこちらを優先する**）
+- **カメラは静か**。据え置き（locked-off）か、ごく遅いドリーだけ。手ブレ・急ズーム・白フラッシュ・回り込みは使わない。
+- **構図は広いシンメトリー**。被写体を画面中央に置き、左右が釣り合う。廊下・机の列・ガラスの仕切りで奥行きを作る。
+- **動くのは人と物**。カメラが動かない分、人物の動作は大きく（勢いよく立ち上がる／ノート PC を叩き閉じる／扉を押し開けて歩き出す）。
+- **照明は画面内に実在する光源だけ**（モニタの光・窓の外の街・天井灯・非常灯）。色は彩度を落とした鋼色の青。
+- 派手な出来事（火花・煙・警報光・豪雨）は起こしてよいが、**それを静かなカメラで撮る**。爆発を追いかけ回さない。
+- **口元が見える構図にする**（正面〜斜め 45 度）。動画 AI にセリフを口パクで喋らせるので、顔が小さすぎたり後ろ姿だったりすると成立しない。
+
+# 3 つのカット（役割は入れ替えない）
+1. **discover（3 秒・先輩）** — 先輩が失敗に気づく瞬間。画面を見た姿勢のまま固まる、勢いよく立ち上がる。セリフは気づきの一言（例: 止まってない）
+2. **struggle（4 秒・主人公）** — 主人公が自分で何とかしようとして、うまくいかない。キーを連打する、端末を叩き閉じる、頭を抱えて立ち上がる。**まだ誰も助けに来ていない**。セリフは焦りの一言（例: 戻せない）
+3. **mobilize（3 秒・上司）** — 上司が動き出す。扉を押し開けて歩き出す、受話器に手を伸ばす、フロアを見渡して指示を出す。**結果は絶対に見せない**（謝罪が通った・請求が消えた・全員が安堵する、は禁止）。セリフは指示・宣言の一言（例: 私が話す）
+
+# カードの文言（interstitials・**この予告で最も重要な言葉**）
+- 日本語 8〜14 字の短い断言を 2 枚。**時間・不可逆・引き返せなさ**の語彙で書く。
+- 手本: 「気づいた時には、遅かった。」「時間は、待たない。」「戻る道は、ない。」「もう、元には戻らない。」
+- **事実の説明を書かない**（「請求は二十万円」「ループが止まっていない」は不可。それは映像が見せる）。
+- 2 枚で同じ型を使わない。1 枚目は「気づき／手遅れ」、2 枚目は「時間／不可逆」にすると効く。
+
+# セリフ（dialogue）
+- **3 本すべて必須**。各 4〜10 字。動画 AI が口パク付きで喋るので、短く言い切る。
+- 説明台詞は禁止（「ラムダのループが止まっていません」は不可 →「止まってない」）。
+- 全員最後まで真顔。ふざけた言葉づかいは使わない。
+
+# タイトル（title / tagline）
+- title は日本語 4〜8 字の体言止め 1 行。字間を極端に広げて出すので短いほど強い。
+- tagline は 8 字以内で極小に添える。無理なら空文字でよい。
+
+${locationBlock()}
+
+# style
+今回は **style: "nolan"** で書くこと。出力の style フィールドにも "nolan" を入れる。
+
+出力は指定された JSON スキーマに厳密に従い、scenes は必ずちょうど ${NOLAN_SCENE_COUNT} 要素にすること。
+narration・telop は全シーン空文字、screen_text は空配列、cut_count は 1、duration_sec は 3 / 4 / 3、
+review_line・stake・button_line は空文字、cast_lines は空配列にすること。`;
 }
 
 /** strict モードの json_schema として使える形かをローカルで検証する（--dry-run 用）。 */

@@ -10,6 +10,31 @@ import path from "node:path";
 import { enrichedView } from "../domain/script/index.mjs";
 import { planTimeline } from "../domain/timeline/plan.mjs";
 import { AMBIENT_VOL, AMBIENT_TARGET_DB } from "../domain/timeline/constants.mjs";
+import { detectVoiceSpan, pickSrcIn } from "../domain/timeline/voice.mjs";
+
+// 発話区間の探索: 声の帯域だけ残して 0.4 秒窓で RMS を測る
+const VOICE_BAND = "highpass=f=250,lowpass=f=3400";
+const VOICE_WINDOW = 0.4;
+
+/**
+ * plan.sfx[]（name と鳴らす時刻）に assets/sfx/<name>.wav の実パスを埋める。
+ * ファイルが無い名前は braam に代替し、それも無ければそのイベントを落とす（音無しで通す）。
+ */
+function resolveSfx(files, sfxDir, plan) {
+  if (!sfxDir || !(plan.sfx ?? []).length) {
+    plan.sfx = [];
+    return plan;
+  }
+  const pick = (name) => {
+    for (const n of [name, "braam"]) {
+      const f = path.join(sfxDir, `${n}.wav`);
+      if (files.ready(f)) return f;
+    }
+    return null;
+  };
+  plan.sfx = plan.sfx.map((e) => ({ ...e, file: pick(e.name) })).filter((e) => e.file);
+  return plan;
+}
 
 /** out/<job>/bgm.* を探す。 */
 function bgmFile(files, dir) {
@@ -26,6 +51,8 @@ function bgmFile(files, dir) {
  */
 async function measureScenes(media, files, paths, view) {
   const src = [];
+  const voice = [];
+  const nolan = view.style === "nolan";
   for (const [i, s] of view.scenes.entries()) {
     const nn = i + 1;
     const vid = path.join(paths.vid, `s${nn}.mp4`);
@@ -54,27 +81,47 @@ async function measureScenes(media, files, paths, view) {
       throw new Error(`素材がありません: ${img} も ${vid} も見つかりません`);
     }
 
+    // nolan はセリフを Veo が喋る。8 秒のクリップから「喋っている所」を含む窓を切り出したいので、
+    // 声の帯域のレベルを 1 回測って発話区間を推定し、srcIn を決めておく（結果は script.json に残す）。
+    let srcIn = 0;
+    if (nolan && useVideo && hasAudio) {
+      const cached = Number.isFinite(s.voice_start) && Number.isFinite(s.voice_end)
+        ? { start: s.voice_start, end: s.voice_end }
+        : null;
+      const span = cached ?? detectVoiceSpan(
+        await media.probeLevels(vid, { windowSec: VOICE_WINDOW, af: VOICE_BAND }),
+        VOICE_WINDOW
+      );
+      srcIn = pickSrcIn(span, { clipSec, needSec: s.duration_sec ?? 3 });
+      if (span) voice.push({ n: nn, start: span.start, end: span.end, srcIn });
+    }
+
     const narSec = hasNar ? await media.probeDuration(narFile) : 0;
     const hasDlg = Boolean(s.dialogue) && files.ready(dlgFile);
     const dlgSec = hasDlg ? await media.probeDuration(dlgFile) : 0;
 
-    src.push({ i, n: nn, s, useVideo, vid, img, clipSec, hasAudio, gainDb, narFile, hasNar, narSec, dlgFile, hasDlg, dlgSec });
+    src.push({ i, n: nn, s, useVideo, vid, img, clipSec, hasAudio, gainDb, srcIn, narFile, hasNar, narSec, dlgFile, hasDlg, dlgSec });
   }
-  return src;
+  return { src, voice };
 }
 
 /**
  * @param {object} deps { store, media, video: { renderCut, composeFinal, writeAss }, rel }
  */
 export async function renderTrailer(deps, job, { force = false } = {}) {
-  const { store, media, files, ffmpegRender, rel } = deps;
+  const { store, media, files, ffmpegRender, rel, sfxDir } = deps;
   const t0 = Date.now();
   const p = store.ensureDirs(job, "scenes", "telop", "cuts", "dlg");
   const view = enrichedView(store.readScript(job));
 
   console.log(`[render] タイムライン設計（${view.scenes.length} シーン / enriched=${view.enriched}）`);
-  const src = await measureScenes(media, files, p, view);
-  const plan = planTimeline(view, src);
+  const { src, voice } = await measureScenes(media, files, p, view);
+  if (voice.length) {
+    console.log(
+      `  発話区間: ${voice.map((v) => `s${v.n} ${v.start.toFixed(2)}〜${v.end.toFixed(2)}s → srcIn ${v.srcIn.toFixed(2)}s`).join(" / ")}`
+    );
+  }
+  const plan = resolveSfx(files, sfxDir, planTimeline(view, src));
 
   const nCut = plan.segs.filter((s) => s.kind !== "card").length;
   const nCard = plan.segs.length - nCut;
@@ -94,6 +141,7 @@ export async function renderTrailer(deps, job, { force = false } = {}) {
   console.log(`  ナレ: ${plan.nar.map((e) => `s${e.n}@${e.at.toFixed(2)}(${e.sec.toFixed(2)}s)`).join(", ")}`);
   console.log(`  セリフ: ${plan.dlg.map((e) => `s${e.n}@${e.at.toFixed(2)}(${e.sec.toFixed(2)}s)「${e.text}」`).join(", ") || "(なし)"}`);
   console.log(`  button: ${plan.btn.map((e) => `@${e.at.toFixed(2)}(${e.sec.toFixed(2)}s)「${e.text}」`).join(", ") || "(なし)"}`);
+  console.log(`  SFX: ${(plan.sfx ?? []).map((e) => `${e.name}@${e.at.toFixed(2)}`).join(", ") || "(なし)"}`);
   console.log(`  無音区間: ${plan.silences.map((sl) => `${sl.start.toFixed(2)}〜${sl.end.toFixed(2)}s`).join(", ")}`);
 
   // --- テロップ ASS -------------------------------------------------------
@@ -138,6 +186,8 @@ export async function renderTrailer(deps, job, { force = false } = {}) {
     cards: nCard,
     dialogue: plan.dlg.length,
     button: plan.btn.length,
+    sfx: (plan.sfx ?? []).length,
+    style: view.style,
     ambient_vol: AMBIENT_VOL,
     bgm: bgmPath ? path.basename(bgmPath) : null,
   });

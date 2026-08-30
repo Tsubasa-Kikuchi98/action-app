@@ -32,7 +32,7 @@ async function prepareSource(media, files, img, dst) {
 }
 
 /** 1 シーン分の生成（投入 → ポーリング → ダウンロード）。失敗しても throw せず reason を返す。 */
-async function generateOne(deps, job, scene, i, { timeoutSec }) {
+async function generateOne(deps, job, scene, i, { timeoutSec, style = "narration" }) {
   const { video, store, media, files, model } = deps;
   const p = store.paths(job);
   const n = i + 1;
@@ -44,7 +44,7 @@ async function generateOne(deps, job, scene, i, { timeoutSec }) {
   }
 
   const dur = veoDuration(scene.duration_sec ?? 4);
-  const prompt = buildVideoPrompt(scene);
+  const prompt = buildVideoPrompt(scene, style);
   const t0 = Date.now();
 
   files.mkdir(p.vid);
@@ -121,7 +121,7 @@ export async function generateVideos(deps, job, { force = false, stills = false,
 --- s${i + 1} [${s.scene_type}] ${d}s 生成 ---`);
       // visual_metaphor は Veo には送らない（日本語）。翻訳が効いているかの確認用に並べて表示する。
       if (s.visual_metaphor) console.log(`  [翻訳] ${s.visual_metaphor}`);
-      console.log(buildVideoPrompt(s));
+      console.log(buildVideoPrompt(s, view.style));
     }
     const cost = (PRICES[model]?.perSec ?? 0) * sec;
     console.log(`
@@ -161,7 +161,7 @@ export async function generateVideos(deps, job, { force = false, stills = false,
   const planSec = todo.reduce((a, t) => a + veoDuration(t.scene.duration_sec ?? 4), 0);
   const planCost = (PRICES[model]?.perSec ?? 0) * planSec;
   console.log(
-    `[video] ${model} / 720p / 16:9 / ${todo.length}本 並列${concurrency} ` +
+    `[video] ${model} / 720p / 16:9 / style=${view.style} / ${todo.length}本 並列${concurrency} ` +
       `/ 計 ${planSec}s ≒ ${fmtUSD(planCost)}（timeout ${timeoutSec}s）`
   );
   if (planSec > budgetSec) {
@@ -172,7 +172,9 @@ export async function generateVideos(deps, job, { force = false, stills = false,
   }
 
   const t0 = Date.now();
-  const results = await pool(todo, concurrency, ({ i }) => generateOne(deps, job, view.scenes[i], i, { timeoutSec }));
+  const results = await pool(todo, concurrency, ({ i }) =>
+    generateOne(deps, job, view.scenes[i], i, { timeoutSec, style: view.style })
+  );
 
   // --- script.json に結果を書き戻す（単一の writer） -----------------------
   for (const r of results) {

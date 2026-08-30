@@ -67,7 +67,7 @@ export async function renderCut(cutsDir, seg, k) {
 }
 
 /**
- * 最終 1 パスの合成。入力は [カット][ナレ][セリフ][button][BGM] の順に並べる。
+ * 最終 1 パスの合成。入力は [カット][ナレ][セリフ][button][SFX][BGM] の順に並べる。
  * @param {{plan: object, cutFiles: string[], assPath: string, fcPath: string, bgm: {file: string, dur: number}|null, out: string}} args
  */
 export async function composeFinal({ plan, cutFiles, assPath, fcPath, bgm, out }) {
@@ -83,6 +83,7 @@ export async function composeFinal({ plan, cutFiles, assPath, fcPath, bgm, out }
   for (const e of plan.nar) args.push("-i", rel(e.file));
   for (const e of plan.dlg) args.push("-i", rel(e.file));
   for (const e of plan.btn) args.push("-i", rel(e.file));
+  for (const e of plan.sfx ?? []) args.push("-i", rel(e.file));
   if (bgm) args.push("-i", rel(bgm.file));
   args.push(
     "-/filter_complex", fcRel,

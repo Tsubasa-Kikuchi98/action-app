@@ -1,12 +1,13 @@
 // 台本を読んで「原理を外していないか」を警告する純関数（削除・書き換えはしない）。
 // 課金せずに何度でも回せるので、生成直後に必ず通す。
-import { NAR_TOTAL_MAX, findForbidden } from "./constants.mjs";
+import { NAR_TOTAL_MAX, NOLAN_SCENE_TYPES, NOLAN_SPEAKER_BY_TYPE, findForbidden } from "./constants.mjs";
 
 /**
  * @param {object} data 正規化済みの台本
  * @returns {string[]} 警告メッセージ（空配列なら問題なし）
  */
 export function lintScript(data) {
+  if (data.style === "nolan") return lintNolan(data);
   const warns = [];
   const texts = [
     data.title, data.tagline, data.presents, data.release_line, data.button_line,
@@ -47,5 +48,58 @@ export function lintScript(data) {
     const nars = data.scenes.filter((s) => s.narration).length;
     if (nars > 2) warns.push(`案 B なのにナレが ${nars} 本あります（2 本まで）`);
   }
+  return warns;
+}
+
+/**
+ * nolan の lint。構成が固定なので「3 セリフ・2 カード・ナレなし・カット内文字なし」を確かめる。
+ * @param {object} data 正規化済みの台本（style: "nolan"）
+ * @returns {string[]} 警告メッセージ
+ */
+function lintNolan(data) {
+  const warns = [];
+  const cards = (data.interstitials ?? []).map((it) => it.text);
+  const texts = [
+    data.title, data.tagline, data.presents, data.release_line, ...cards,
+    ...data.scenes.map((s) => s.dialogue),
+  ];
+  const bad = [...new Set(texts.flatMap(findForbidden))];
+  if (bad.length) warns.push(`禁句が含まれています: ${bad.join(" / ")}`);
+
+  if (data.scenes.length !== 3) warns.push(`nolan は 3 シーン構成です（${data.scenes.length} シーン）`);
+  const types = data.scenes.map((s) => s.scene_type).join(",");
+  if (types !== NOLAN_SCENE_TYPES.join(",")) warns.push(`scene_type の並びが ${types}（想定は ${NOLAN_SCENE_TYPES.join(",")}）`);
+
+  for (const s of data.scenes) {
+    if (s.narration) warns.push(`s${s.index}: nolan にナレーションは入れません`);
+    if (s.telop || (s.screen_text ?? []).length) warns.push(`s${s.index}: カット内に文字を出しません（telop / screen_text は空）`);
+    if (!s.dialogue) warns.push(`s${s.index}: セリフがありません（全 3 シーン必須）`);
+    else if (s.dialogue.length < 4 || s.dialogue.length > 10) warns.push(`s${s.index}: セリフ「${s.dialogue}」が ${s.dialogue.length} 字（4〜10 字）`);
+    const want = NOLAN_SPEAKER_BY_TYPE[s.scene_type];
+    if (s.dialogue && want && s.speaker !== want) warns.push(`s${s.index}: 話者が ${s.speaker}（${s.scene_type} は ${want}）`);
+    if (!s.visual_metaphor) warns.push(`s${s.index}: visual_metaphor が空`);
+    else if (!/[→>]/.test(s.visual_metaphor)) warns.push(`s${s.index}: visual_metaphor が「現実 → 演出」の形になっていない`);
+    if (s.cut_count !== 1) warns.push(`s${s.index}: nolan は 1 クリップ 1 カットです（cut_count=${s.cut_count}）`);
+  }
+
+  const dlgs = data.scenes.map((s) => s.dialogue).filter(Boolean);
+  if (new Set(dlgs).size !== dlgs.length) warns.push("同じセリフが 2 回出ています");
+
+  if (cards.length !== 2) warns.push(`中間カードが ${cards.length} 枚です（2 枚必須）`);
+  cards.forEach((t, i) => {
+    if (!t) warns.push(`中間カード${i + 1} が空です`);
+    else if (t.length > 14) warns.push(`中間カード${i + 1}「${t}」が ${t.length} 字（14 字以内）`);
+  });
+  const pos = (data.interstitials ?? []).map((it) => it.after_scene).join(",");
+  if (pos !== "1,2") warns.push(`中間カードの位置が ${pos || "(なし)"}（想定は 1,2）`);
+
+  if (data.review_line || data.stake || data.button_line || (data.cast_lines ?? []).length) {
+    warns.push("nolan では review_line / stake / button_line / cast_lines を使いません");
+  }
+  if (!data.title) warns.push("title が空です");
+  else if (data.title.length > 12) warns.push(`title「${data.title}」が ${data.title.length} 字（12 字以内が字間を広げやすい）`);
+
+  const total = data.scenes.reduce((a, s) => a + s.duration_sec, 0);
+  if (total !== 10) warns.push(`映像の合計尺 ${total}s（nolan は 3+4+3=10s）`);
   return warns;
 }

@@ -73,6 +73,29 @@ export async function generateNarration(deps, job, { force = false } = {}) {
   const round = roundingEnabled();
   const speed = Number(process.env.TTS_SPEED ?? 1.25);
 
+  // nolan はナレーションが無く、セリフは Veo が口パク付きで喋る（TTS では作らない）。
+  // 尺も台本の 3 / 4 / 3 秒をそのまま使うので、4/6/8 への丸めも行わない。
+  if (view.style === "nolan") {
+    console.log("[narration] style=nolan: ナレーションもセリフも TTS では作りません（声は Veo クリップの中）");
+    for (const [i, scene] of data.scenes.entries()) {
+      const n = i + 1;
+      scene.nar_sec = 0;
+      scene.base_sec = scene.base_sec ?? scene.duration_sec ?? 3;
+      delete scene.dlg_sec;
+      for (const f of [path.join(p.nar, `s${n}.wav`), path.join(p.dlg, `s${n}.wav`)]) {
+        if (files.exists(f)) files.remove(f);
+      }
+      console.log(`  s${n}: [${view.scenes[i].scene_type}] セリフ「${view.scenes[i].dialogue || "(なし)"}」→ Veo / scene ${scene.duration_sec}s`);
+    }
+    delete data.button_sec;
+    const btn = path.join(p.dlg, "button.wav");
+    if (files.exists(btn)) files.remove(btn);
+    store.writeScript(job, data);
+    const t = data.scenes.reduce((a, s) => a + s.duration_sec, 0);
+    console.log(`[narration] 合計シーン尺 ${t.toFixed(1)}s / 推定 $0.0000（API 未使用）`);
+    return { data, cost: 0 };
+  }
+
   const dlgCount = view.scenes.filter((s) => s.dialogue).length;
   console.log(
     `[narration] ${model} / nar voice=${voice} / speed=${speed} / wav / ` +

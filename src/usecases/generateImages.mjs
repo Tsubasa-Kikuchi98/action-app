@@ -26,7 +26,7 @@ export async function generateImages(deps, job, { force = false } = {}) {
   const size = process.env.IMG_SIZE ?? "1536x1024";
   const quality = process.env.IMG_QUALITY ?? "low";
 
-  console.log(`[images] ${model} / ${size} / ${quality} / ${view.scenes.length}枚 並列`);
+  console.log(`[images] ${model} / ${size} / ${quality} / ${view.scenes.length}枚 並列 / style=${view.style}`);
 
   const tasks = view.scenes.map((scene, i) => async () => {
     const n = i + 1;
@@ -38,7 +38,7 @@ export async function generateImages(deps, job, { force = false } = {}) {
 
     const sr = refs.sceneRefs(scene);
     const useEdit = sr.files.length > 0;
-    const prompt = useEdit ? buildEditPrompt(scene, sr) : buildGeneratePrompt(scene);
+    const prompt = useEdit ? buildEditPrompt(scene, sr, view.style) : buildGeneratePrompt(scene, view.style);
     const label = useEdit
       ? `edits ref=[${[...sr.chars, ...(sr.loc ? [`@${sr.loc}`] : [])].join(",")}]`
       : "generations (参照なし)";

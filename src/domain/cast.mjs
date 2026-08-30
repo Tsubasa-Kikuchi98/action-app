@@ -47,6 +47,10 @@ export const DEFAULT_LOCATION = {
   turn: "office",
   montage: "corridor",
   resolve: "meeting",
+  // nolan（3 カット構成）
+  discover: "office",
+  struggle: "office",
+  mobilize: "corridor",
 };
 export const defaultLocation = (type) => DEFAULT_LOCATION[type] ?? "office";
 

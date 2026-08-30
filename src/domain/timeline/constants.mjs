@@ -12,6 +12,13 @@ export const FONT = "C\:/Windows/Fonts/YuGothB.ttc";
 // Windows のフォントは fontconfig が拾うので fontsdir は渡さない。
 export const FONTNAME = "Yu Gothic";
 
+// nolan のカードは「白の細めゴシック・字間を広く」。
+// fontconfig は Windows の Yu Gothic ファミリを weight 別の名前でも解決できる（実機で確認済み）:
+//   Yu Gothic (Regular) / Yu Gothic Medium / Yu Gothic Light / Noto Sans JP
+// カードは Regular（Bold を切る）、タイトルだけ Light にして INCEPTION / TENET 風の細さを出す。
+export const FONTNAME_NOLAN = process.env.FONTNAME_NOLAN ?? "Yu Gothic";
+export const FONTNAME_NOLAN_TITLE = process.env.FONTNAME_NOLAN_TITLE ?? "Yu Gothic Light";
+
 // レターボックス 2.39:1（1920x804）→ 上下 138px の黒帯
 export const BAR = Number(process.env.LETTERBOX ?? 138);
 
@@ -73,6 +80,35 @@ export const MAX_CUTS_PER_SCENE = Number(process.env.MAX_CUTS_PER_SCENE ?? 6);
 export const TELOP_MAX_CUT_HEAD = Number(process.env.TELOP_MAX_CUT_HEAD ?? 2.0);
 export const TELOP_MAX_AFTER_NAR = Number(process.env.TELOP_MAX_AFTER_NAR ?? 2.8);
 export const SLOW_FACTOR = Number(process.env.SLOW_FACTOR ?? 1.8); // montage の 1 カットをスローに
+
+// ---------------------------------------------------------------- nolan
+// カード↔カットを交互に置くだけの構成なので、つまみはカード尺と音量だけ。
+export const NOLAN_PRESENTS_SEC = Number(process.env.NOLAN_PRESENTS_SEC ?? 1.4);
+export const NOLAN_CARD_SEC = Number(process.env.NOLAN_CARD_SEC ?? 1.6);      // 中間カード（1.2〜2.0）
+export const NOLAN_STOPDOWN_SEC = Number(process.env.NOLAN_STOPDOWN_SEC ?? 0.4); // タイトル直前の全レーン無音
+export const NOLAN_TITLE_SEC = Number(process.env.NOLAN_TITLE_SEC ?? 3.0);
+export const NOLAN_END_SEC = Number(process.env.NOLAN_END_SEC ?? 2.0);
+export const NOLAN_MIN_SCENE = 1.5;
+/** nolan の BGM はナレが無く環境音が主役なので、既定より少しだけ上げる。 */
+export const NOLAN_BGM_VOL = Number(process.env.NOLAN_BGM_VOL ?? 0.26);
+/**
+ * nolan の各カードの字間（ASS の Spacing）。
+ * libass は**最後の 1 文字の後ろにも字間を足す**ので、\an5 で中央に置くと
+ * 字間の半分だけ左にずれる。置くときは x に Spacing/2 を足して打ち消す。
+ */
+export const NOLAN_SPACING = {
+  PresentsNolan: 24,
+  CardNolan: 20,
+  TitleNolan: 40,
+  TitleSubNolan: 16,
+  EndNolan: 28,
+};
+export const nolanCenterX = (style) => Math.round(W / 2 + (NOLAN_SPACING[style] ?? 0) / 2);
+
+/** SFX（ブラーム）レーンの音量。 */
+export const SFX_VOL = Number(process.env.SFX_VOL ?? 0.85);
+/** カード開始に対する SFX の前倒し秒（0 = カード開始と同時）。 */
+export const SFX_LEAD = Number(process.env.SFX_LEAD ?? 0);
 
 /** 秒をフレーム境界にスナップ（concat のドリフト防止）。 */
 export const snap = (sec) => Math.max(1, Math.round(sec * FPS)) / FPS;
