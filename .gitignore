@@ -16,3 +16,7 @@ assets/bgm/*.wav
 # 基準画像（キャラクターシート / ロケーションプレート）。ジョブ横断で使い回すが再生成できるので追跡しない。
 assets/refs/*.png
 !.env.example
+
+# 効果音（ブラーム等）。ジョブ横断で使い回すが再生成できるので追跡しない。
+assets/sfx/*.wav
+assets/sfx/*.mp3
